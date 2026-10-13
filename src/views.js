@@ -17,25 +17,25 @@ const card = (label, value, glyph, tone, caption = '') => `
   <article class="metric-card tone-${tone}"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon(glyph, 18)}</span></div>
   <strong>${value}</strong>${caption ? `<small>${caption}</small>` : ''}</article>`;
 const pageHead = (eyebrow, title, text, actions = '') => `
-  <section class="page-heading"><div class="print-brand"><img src="/brand-mark.svg" alt=""><span><strong>CV SURYA PRATAMA MANDIRI</strong><small>Laporan PO supplier</small></span></div><div><p class="eyebrow">${esc(eyebrow)}</p><h1>${esc(title)}</h1><p>${esc(text)}</p></div><div class="heading-actions">${actions}</div></section>`;
+  <section class="page-heading"><div class="print-brand"><img src="/brand-logo.png" alt=""><span><strong>CV SURYA PRATAMA MANDIRI</strong><small>Laporan PO supplier</small></span></div><div><p class="eyebrow">${esc(eyebrow)}</p><h1>${esc(title)}</h1><p>${esc(text)}</p></div><div class="heading-actions">${actions}</div></section>`;
 const tableWrap = (content) => `<div class="table-wrap">${content}</div>`;
 
-export function renderSignIn(mode, message = '') {
+export function renderSignIn(mode, message = '', messageType = 'info', busy = false) {
   const signup = mode === 'signup';
   return `<main class="auth-screen"><section class="auth-card">
-    <img src="/brand-mark.svg" alt="" class="auth-logo"><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p>
+    <img src="/brand-logo.png" alt="Logo CV Surya Pratama Mandiri" class="auth-logo"><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p>
     <h1>${signup ? 'Mulai ruang kerja Anda' : 'Selamat datang kembali'}</h1>
     <p class="auth-copy">Catatan keuangan dan produksi tersimpan di akun Anda dan bisa dibuka dari perangkat lain.</p>
-    ${message ? `<div class="notice notice-info">${icon('alert', 17)}<span>${esc(message)}</span></div>` : ''}
+    ${message ? `<div class="notice notice-${messageType === 'warn' ? 'warn' : 'info'}" role="status">${icon('alert', 17)}<span>${esc(message)}</span></div>` : ''}
     <form data-form="auth" data-mode="${signup ? 'signup' : 'login'}" class="form-stack">
       <label class="field"><span>Email</span><input required autocomplete="email" type="email" name="email" placeholder="nama@perusahaan.com"></label>
       <label class="field"><span>Kata sandi</span><input required minlength="8" autocomplete="${signup ? 'new-password' : 'current-password'}" type="password" name="password" placeholder="Minimal 8 karakter"></label>
-      <button class="button primary button-wide" type="submit">${icon(signup ? 'plus' : 'check', 17)}<span>${signup ? 'Buat akun' : 'Masuk'}</span></button>
+      <button class="button primary button-wide" type="submit" ${busy ? 'disabled' : ''}>${icon(signup ? 'plus' : 'check', 17)}<span>${busy ? 'Memproses…' : signup ? 'Buat akun' : 'Masuk'}</span></button>
     </form>
     <p class="auth-switch">${signup ? 'Sudah memiliki akun?' : 'Belum memiliki akun?'}
       <button type="button" data-act="auth-mode" data-mode="${signup ? 'login' : 'signup'}">${signup ? 'Masuk' : 'Daftar akun'}</button>
     </p>
-    <div class="auth-foot">Data akun dipisahkan oleh kebijakan akses Supabase.</div>
+    <div class="auth-foot">Akun perusahaan tersambung ke ruang kerja bersama di Supabase.</div>
   </section></main>`;
 }
 
@@ -324,6 +324,45 @@ function imports(state) {
     <div class="notice notice-info">${icon('alert', 17)}<span>Data yang belum memiliki tanggal janji atau catatan kendala tetap diimpor, tetapi tidak akan dilabeli terlambat atau diberi akar masalah otomatis.</span></div>`;
 }
 
+function inputLogs(state) {
+  const month = state.month;
+  const logs = state.inputLogs.filter((row) => String(row.created_at || '').slice(0, 7) === month);
+  const labelForTable = {
+    company_settings: 'Saldo awal', cashflow_transactions: 'Transaksi kas',
+    supplier_ledger_entries: 'Buku pemasok', sales_invoices: 'Invoice',
+    supplier_purchase_orders: 'PO supplier', customer_orders: 'PO customer',
+    production_events: 'Kendala produksi',
+  };
+  const labelForAction = { insert: 'Tambah', update: 'Ubah', delete: 'Hapus' };
+  const metrics = [
+    ['Input bulan ini', integer(logs.length), 'file', 'blue'],
+    ['Data ditambahkan', integer(logs.filter((row) => row.action === 'insert').length), 'plus', 'green'],
+    ['Data diperbarui', integer(logs.filter((row) => row.action === 'update').length), 'refresh', 'orange'],
+    ['Data dihapus', integer(logs.filter((row) => row.action === 'delete').length), 'trash', 'red'],
+  ];
+  const logRows = logs.map((row) => {
+    const changes = Object.entries(row.changes || {}).map(([key, value]) => {
+      const detail = typeof value === 'string' ? value : JSON.stringify(value);
+      return `<span><b>${esc(key.replace(/_/g, ' '))}</b> ${esc(detail)}</span>`;
+    }).join('');
+    const date = row.created_at ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.created_at)) : '—';
+    return `<tr><td class="mono">${esc(date)}</td><td>${esc(row.actor_email || 'Akun sistem')}</td><td><span class="status status-${row.action === 'delete' ? 'late' : row.action === 'insert' ? 'done' : 'partial'}">${esc(labelForAction[row.action] || row.action)}</span></td><td>${esc(labelForTable[row.table_name] || row.table_name)}</td><td>${row.record_id ? `<span class="mono">${esc(row.record_id.slice(0, 8))}</span>` : '—'}</td><td>${changes ? `<details class="log-changes"><summary>Lihat perubahan</summary><div>${changes}</div></details>` : '—'}</td></tr>`;
+  }).join('');
+  const users = state.profiles.map((profile) => {
+    const isCurrentUser = profile.user_id === state.session?.user?.id;
+    const assigned = Boolean(profile.workspace_id);
+    return `<tr><td>${esc(profile.email || 'Email belum tersedia')}${isCurrentUser ? ' <span class="subtle-note">(akun Anda)</span>' : ''}</td><td><span class="role-pill role-${esc(profile.role)}">${profile.role === 'developer' ? 'Developer' : 'Staff'}</span></td><td><span class="status status-${assigned ? 'done' : 'pending'}">${assigned ? 'Aktif' : 'Menunggu akses'}</span></td><td>${isCurrentUser ? '—' : `<form class="role-form" data-form="workspace-role"><input type="hidden" name="user_id" value="${esc(profile.user_id)}"><select name="role" aria-label="Peran ${esc(profile.email)}"><option value="staff" ${profile.role === 'staff' ? 'selected' : ''}>Staff</option><option value="developer" ${profile.role === 'developer' ? 'selected' : ''}>Developer</option></select><button class="button secondary" type="submit" ${state.busy ? 'disabled' : ''}>Simpan</button></form>`}</td></tr>`;
+  }).join('');
+  return `${pageHead('AKSES DEVELOPER', 'Log Input', 'Telusuri siapa yang menambah, mengubah, atau menghapus data. Atur juga akses staff ke ruang kerja perusahaan.')}
+    <div class="metric-grid log-metrics">${metrics.map(([label, value, glyph, tone]) => card(label, value, glyph, tone, `Periode ${esc(month)}`)).join('')}</div>
+    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">JEJAK PERUBAHAN</p><h2>Aktivitas data</h2><p>Log mengikuti periode pilihan. Maksimal 500 perubahan terbaru dimuat.</p></div></div>
+      ${logs.length ? tableWrap(`<table><thead><tr><th>Waktu</th><th>Akun</th><th>Aksi</th><th>Data</th><th>ID</th><th>Ringkasan perubahan</th></tr></thead><tbody>${logRows}</tbody></table>`) : emptyState('Belum ada input bulan ini', 'Perubahan data yang tersimpan akan muncul di sini.', '', '', 'file')}
+    </section>
+    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">AKUN RUANG KERJA</p><h2>Akses staff dan developer</h2><p>Akun baru harus ditautkan ke ruang kerja sebelum dapat membuka data perusahaan.</p></div></div>
+      ${users.length ? tableWrap(`<table><thead><tr><th>Email</th><th>Peran</th><th>Status akses</th><th>Atur peran</th></tr></thead><tbody>${users}</tbody></table>`) : emptyState('Belum ada akun lain', 'Akun yang mendaftar akan tercantum di sini.', '', '', 'users')}
+    </section>`;
+}
+
 export function renderPage(tab, data, state) {
   const pages = {
     dashboard: () => dashboard(data, state),
@@ -334,6 +373,7 @@ export function renderPage(tab, data, state) {
     supplier: () => supplierOrders(data, state),
     kalkulator: () => calculator(state),
     impor: () => imports(state),
+    'logs-input': () => inputLogs(state),
   };
   return (pages[tab] || pages.dashboard)();
 }
@@ -343,5 +383,6 @@ export const pageTabs = [
   ['piutang', 'Piutang', 'users'], ['tagihan', 'Tagihan', 'file'],
   ['produksi', 'Produksi', 'factory'], ['supplier', 'PO Supplier', 'package'],
   ['kalkulator', 'Kalkulator', 'calculator'], ['impor', 'Impor data', 'upload'],
+  ['logs-input', 'Log Input', 'file'],
 ];
 

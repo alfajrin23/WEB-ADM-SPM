@@ -54,7 +54,7 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
   backdrop-filter: blur(18px);
 }
 .brand { display: flex; flex: 0 0 250px; align-items: center; gap: 11px; color: var(--ink); text-decoration: none; }
-.brand img { width: 48px; height: 42px; object-fit: contain; }
+.brand img { width: 48px; height: 42px; object-fit: contain; mix-blend-mode: multiply; }
 .brand span { display: grid; gap: 3px; }
 .brand strong { font: 800 .89rem/1.2 Manrope, sans-serif; letter-spacing: -.025em; }
 .brand small { color: var(--muted); font-size: .7rem; letter-spacing: .07em; text-transform: uppercase; }
@@ -179,6 +179,16 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
 .notice-warn { border-color: #ebd8b4; background: #fbf3e4; color: #795d2e; }
 .notice-info { border-color: #d4e0e8; background: #eff4f7; color: #49687f; }
 .notice-success { border-color: #cfe1d4; background: #eff6f0; color: #3f7655; }
+.role-pill { display: inline-flex; padding: 5px 9px; border: 1px solid #d8e1e8; border-radius: 999px; background: #eef3f6; color: #49687f; font-size: .67rem; font-weight: 800; }
+.role-pill.role-developer { border-color: #e9d6b5; background: #fbf3e4; color: #795d2e; }
+.role-form { display: flex; align-items: center; gap: 7px; min-width: 210px; }
+.role-form select { min-height: 37px; padding: 7px 9px; border: 1px solid #e2e0d8; border-radius: 10px; background: #fffefa; color: var(--ink); font-size: .72rem; }
+.role-form .button { min-height: 37px; padding: 0 10px; font-size: .68rem; }
+.log-changes { max-width: 300px; color: #65747c; font-size: .68rem; }
+.log-changes summary { cursor: pointer; color: var(--navy); font-weight: 800; }
+.log-changes > div { display: grid; gap: 5px; max-height: 180px; margin-top: 7px; padding: 8px; overflow: auto; border-radius: 9px; background: #f5f3ed; }
+.log-changes > div span { overflow-wrap: anywhere; }
+.log-changes > div b { color: var(--ink); text-transform: capitalize; }
 .setup-notice { margin: 0 0 16px; }
 .balance-ribbon { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 14px; margin: 16px 0 0; padding: 13px 17px; border: 1px solid #d9dee1; border-radius: 15px; background: #edf1f2; }
 .balance-ribbon span { display: inline-flex; align-items: center; gap: 8px; color: #566875; font-size: .76rem; font-weight: 700; }

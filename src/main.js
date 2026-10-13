@@ -1,4 +1,7 @@
-import { supabase, isConfigured, loadWorkspace, saveRow, deleteRow, upsertRows } from './db.js';
+import {
+  supabase, isConfigured, loadProfile, loadWorkspace, loadInputLogs, loadWorkspaceUsers,
+  setWorkspaceId, setWorkspaceUserRole, saveRow, deleteRow, upsertRows,
+} from './db.js';
 import { inspectWorkbook } from './importer.js';
 import {
   CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, icon, isoToday, localISODate,
@@ -15,12 +18,18 @@ const emptyData = () => ({
 
 const state = {
   session: null,
+  profile: null,
+  profileLoading: false,
+  profileError: '',
   tab: 'dashboard',
   authMode: 'login',
   authMessage: '',
+  authMessageType: 'info',
   loading: false,
   loadError: '',
   data: emptyData(),
+  inputLogs: [],
+  profiles: [],
   month: localISODate(new Date()).slice(0, 7),
   category: '',
   invoiceStatus: '',
@@ -39,6 +48,7 @@ const state = {
 };
 
 const app = document.querySelector('#app');
+let authHydration = 0;
 
 function toast(message, type = 'success') {
   clearTimeout(state.toastTimer);
@@ -61,17 +71,31 @@ function friendlyError(error) {
 function render() {
   document.body.dataset.tab = state.tab;
   if (!isConfigured) {
-    app.innerHTML = `<main class="auth-screen"><section class="auth-card"><img src="/brand-mark.svg" class="auth-logo" alt=""><p class="eyebrow">PENYIAPAN APLIKASI</p><h1>Hubungkan ruang kerja</h1><p class="auth-copy">Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY di .env.local, lalu jalankan ulang server.</p><div class="notice notice-info">${icon('alert', 17)}<span>Kunci service role tidak diperlukan pada aplikasi browser.</span></div></section></main>`;
+    app.innerHTML = `<main class="auth-screen"><section class="auth-card"><img src="/brand-logo.png" class="auth-logo" alt="Logo CV Surya Pratama Mandiri"><p class="eyebrow">PENYIAPAN APLIKASI</p><h1>Hubungkan ruang kerja</h1><p class="auth-copy">Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY di .env.local, lalu jalankan ulang server.</p><div class="notice notice-info">${icon('alert', 17)}<span>Kunci service role tidak diperlukan pada aplikasi browser.</span></div></section></main>`;
     return;
   }
   if (!state.session) {
-    app.innerHTML = `${renderSignIn(state.authMode, state.authMessage)}<div class="toast-stack"></div>`;
+    app.innerHTML = `${renderSignIn(state.authMode, state.authMessage, state.authMessageType, state.busy)}<div class="toast-stack"></div>`;
+    return;
+  }
+  if (state.profileLoading) {
+    app.innerHTML = `<main class="auth-screen"><section class="auth-card"><img src="/brand-logo.png" class="auth-logo" alt="Logo CV Surya Pratama Mandiri"><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p><h1>Memeriksa akses akun</h1><p class="auth-copy">Menghubungkan akun ke ruang kerja perusahaan.</p><div class="loading-grid"><div class="skeleton-card"></div></div></section></main>`;
+    return;
+  }
+  if (state.profileError) {
+    app.innerHTML = `<main class="auth-screen"><section class="auth-card"><img src="/brand-logo.png" class="auth-logo" alt="Logo CV Surya Pratama Mandiri"><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p><h1>Akses akun belum siap</h1><div class="notice notice-warn">${icon('alert', 17)}<span>${esc(state.profileError)}</span></div><button type="button" class="button secondary button-wide" data-act="signout">Keluar</button></section></main>`;
+    return;
+  }
+  if (!state.profile?.workspace_id) {
+    app.innerHTML = `<main class="auth-screen"><section class="auth-card"><img src="/brand-logo.png" class="auth-logo" alt="Logo CV Surya Pratama Mandiri"><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p><h1>Akun menunggu akses</h1><p class="auth-copy">Akun <strong>${esc(state.session.user?.email || '')}</strong> sudah masuk, tetapi belum ditautkan ke ruang kerja. Minta developer memberi akses melalui menu Log Input.</p><button type="button" class="button secondary button-wide" data-act="signout">Keluar</button></section></main>`;
     return;
   }
   const displayName = state.session.user?.email || 'Akun SPM';
-  const tabs = pageTabs.map(([key, label, glyph]) => `<button class="nav-tab ${state.tab === key ? 'active' : ''}" type="button" data-act="navigate" data-tab="${key}">${icon(glyph, 17)}<span>${esc(label)}</span></button>`).join('');
+  const visibleTabs = pageTabs.filter(([key]) => key !== 'logs-input' || state.profile.role === 'developer');
+  if (!visibleTabs.some(([key]) => key === state.tab)) state.tab = state.profile.role === 'staff' ? 'produksi' : 'dashboard';
+  const tabs = visibleTabs.map(([key, label, glyph]) => `<button class="nav-tab ${state.tab === key ? 'active' : ''}" type="button" data-act="navigate" data-tab="${key}">${icon(glyph, 17)}<span>${esc(label)}</span></button>`).join('');
   app.innerHTML = `<div class="app-shell">
-    <header class="topbar"><a class="brand" href="#" data-act="navigate" data-tab="dashboard"><img src="/brand-mark.svg" alt=""/><span><strong>CV Surya Pratama Mandiri</strong><small>Ruang kerja operasional</small></span></a>
+    <header class="topbar"><a class="brand" href="#" data-act="navigate" data-tab="dashboard"><img src="/brand-logo.png" alt="Logo CV Surya Pratama Mandiri"/><span><strong>CV Surya Pratama Mandiri</strong><small>${state.profile.role === 'developer' ? 'Developer' : 'Staff'} · Ruang kerja operasional</small></span></a>
       <nav class="main-nav" aria-label="Menu utama">${tabs}</nav>
       <div class="account-menu"><span class="account-dot"></span><span class="account-email">${esc(displayName)}</span><button type="button" class="icon-button" aria-label="Keluar" title="Keluar" data-act="signout">${icon('logout', 17)}</button></div>
     </header>
@@ -98,6 +122,12 @@ async function refreshData() {
   render();
   try {
     state.data = { ...emptyData(), ...await loadWorkspace() };
+    if (state.profile?.role === 'developer') {
+      [state.inputLogs, state.profiles] = await Promise.all([loadInputLogs(), loadWorkspaceUsers()]);
+    } else {
+      state.inputLogs = [];
+      state.profiles = [];
+    }
   } catch (error) {
     state.loadError = friendlyError(error);
   } finally {
@@ -268,8 +298,9 @@ async function saveModal(form) {
   if (action === 'save-opening') {
     const userId = state.session.user.id;
     const { error } = await supabase.from('company_settings').upsert({
-      owner_id: userId, opening_balance: num('opening_balance'), opening_balance_date: values.opening_balance_date,
-    }, { onConflict: 'owner_id' });
+      owner_id: userId, workspace_id: state.profile.workspace_id,
+      opening_balance: num('opening_balance'), opening_balance_date: values.opening_balance_date,
+    }, { onConflict: 'workspace_id' });
     if (error) throw error;
     return;
   }
@@ -338,13 +369,14 @@ async function saveModal(form) {
 async function runImport() {
   const preview = state.importPreview;
   if (!preview?.records.length) throw new Error('Tidak ada baris yang dapat diimpor.');
-  const conflict = preview.type === 'supplier_purchase_orders' ? 'owner_id,po_number' : 'owner_id,source_key';
+  const conflict = preview.type === 'supplier_purchase_orders' ? 'workspace_id,po_number' : 'workspace_id,source_key';
   await upsertRows(preview.type, preview.records, conflict);
   if (preview.type === 'cashflow_transactions' && preview.openingBalance != null) {
     const { error } = await supabase.from('company_settings').upsert({
-      owner_id: state.session.user.id, opening_balance: preview.openingBalance,
+      owner_id: state.session.user.id, workspace_id: state.profile.workspace_id,
+      opening_balance: preview.openingBalance,
       opening_balance_date: preview.openingBalanceDate || `${state.month}-01`,
-    }, { onConflict: 'owner_id' });
+    }, { onConflict: 'workspace_id' });
     if (error) throw error;
   }
   toast(`${preview.records.length} baris berhasil diimpor.`, 'success');
@@ -397,8 +429,11 @@ async function handleClick(event) {
   if (action === 'backdrop' && event.target === button) { state.modal = null; render(); return; }
   if (action === 'dismiss-toast') { document.querySelector('.toast-stack').innerHTML = ''; return; }
   if (action === 'close-modal') { state.modal = null; state.pendingDelete = null; render(); return; }
-  if (action === 'auth-mode') { state.authMode = button.dataset.mode; state.authMessage = ''; render(); return; }
-  if (action === 'navigate') { state.tab = button.dataset.tab; state.search = ''; state.modal = null; render(); return; }
+  if (action === 'auth-mode') { state.authMode = button.dataset.mode; state.authMessage = ''; state.authMessageType = 'info'; render(); return; }
+  if (action === 'navigate') {
+    if (button.dataset.tab === 'logs-input' && state.profile?.role !== 'developer') return;
+    state.tab = button.dataset.tab; state.search = ''; state.modal = null; render(); return;
+  }
   if (action === 'select-month') { state.month = button.dataset.month; render(); return; }
   if (action === 'change-year') {
     const [year, month] = state.month.split('-').map(Number);
@@ -540,6 +575,8 @@ async function handleSubmit(event) {
   event.preventDefault();
   if (form.dataset.form === 'auth') {
     const values = Object.fromEntries(new FormData(form).entries());
+    state.authMessage = '';
+    state.authMessageType = 'info';
     state.busy = true; render();
     try {
       const result = form.dataset.mode === 'signup'
@@ -548,10 +585,27 @@ async function handleSubmit(event) {
       if (result.error) throw result.error;
       if (form.dataset.mode === 'signup' && !result.data.session) {
         state.authMessage = 'Akun dibuat. Buka tautan konfirmasi dari email sebelum masuk.';
+        state.authMessageType = 'info';
         toast('Periksa email Anda untuk konfirmasi akun.', 'info');
-      } else state.authMessage = '';
-    } catch (error) { toast(friendlyError(error), 'error'); }
+      } else { state.authMessage = ''; state.authMessageType = 'info'; }
+    } catch (error) {
+      state.authMessage = friendlyError(error);
+      state.authMessageType = 'warn';
+    }
     finally { state.busy = false; render(); }
+    return;
+  }
+  if (form.dataset.form === 'workspace-role') {
+    const values = Object.fromEntries(new FormData(form).entries());
+    state.busy = true;
+    render();
+    try {
+      await setWorkspaceUserRole(values.user_id, values.role);
+      state.profiles = await loadWorkspaceUsers();
+      toast('Akses akun berhasil diperbarui.');
+    } catch (error) {
+      toast(friendlyError(error), 'error');
+    } finally { state.busy = false; render(); }
     return;
   }
   if (form.dataset.form !== 'modal') return;
@@ -575,19 +629,67 @@ app.addEventListener('input', handleInput);
 app.addEventListener('change', handleChange);
 app.addEventListener('submit', handleSubmit);
 
-if (isConfigured) {
-  supabase.auth.onAuthStateChange((_event, session) => {
-    state.session = session;
-    state.modal = null;
+async function activateSession(session) {
+  const requestId = ++authHydration;
+  state.session = session;
+  state.modal = null;
+  state.profileError = '';
+  state.loading = false;
+  state.loadError = '';
+  if (!session) {
+    state.profile = null;
+    state.profileLoading = false;
+    state.loading = false;
+    state.loadError = '';
+    state.data = emptyData();
+    state.inputLogs = [];
+    state.profiles = [];
+    setWorkspaceId(null);
     render();
-    if (session) refreshData();
-    else { state.data = emptyData(); state.loadError = ''; }
+    return;
+  }
+
+  state.profile = null;
+  state.profileLoading = true;
+  setWorkspaceId(null);
+  render();
+  try {
+    const profile = await loadProfile(session.user.id);
+    if (requestId !== authHydration || state.session?.user?.id !== session.user.id) return;
+    state.profile = profile;
+    state.profileLoading = false;
+    setWorkspaceId(profile.workspace_id);
+    if (!profile.workspace_id) { render(); return; }
+    if (profile.role === 'staff' && state.tab === 'logs-input') state.tab = 'produksi';
+    await refreshData();
+  } catch (error) {
+    if (requestId !== authHydration || state.session?.user?.id !== session.user.id) return;
+    state.profileLoading = false;
+    state.loading = false;
+    state.profileError = friendlyError(error);
+    render();
+  }
+}
+
+if (isConfigured) {
+  let receivedAuthEvent = false;
+  supabase.auth.onAuthStateChange((_event, session) => {
+    receivedAuthEvent = true;
+    void activateSession(session);
   });
   supabase.auth.getSession().then(({ data, error }) => {
-    if (error) { toast(friendlyError(error), 'error'); return; }
-    state.session = data.session;
+    if (receivedAuthEvent) return;
+    if (error) {
+      state.authMessage = friendlyError(error);
+      state.authMessageType = 'warn';
+      render();
+      return;
+    }
+    void activateSession(data.session);
+  }).catch((error) => {
+    state.authMessage = friendlyError(error);
+    state.authMessageType = 'warn';
     render();
-    if (data.session) refreshData();
   });
 }
 
