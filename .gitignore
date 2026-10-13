@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vercel/
+.env
+.env.*
+!.env.example
+bahan awal/
+*.xlsx
+*.xls
+*.csv
+.codegraph/
+*.log
+

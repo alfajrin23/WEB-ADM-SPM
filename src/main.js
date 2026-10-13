@@ -1,0 +1,595 @@
+import { supabase, isConfigured, loadWorkspace, saveRow, deleteRow, upsertRows } from './db.js';
+import { inspectWorkbook } from './importer.js';
+import {
+  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, icon, isoToday, localISODate,
+  orderProgress, rupiah, toNumber,
+} from './helpers.js';
+import { pageTabs, renderPage, renderSignIn } from './views.js';
+import { priceSpecs, pricelist } from './pricelist-data.js';
+import './style.css';
+
+const emptyData = () => ({
+  company_settings: [], cashflow_transactions: [], supplier_ledger_entries: [], sales_invoices: [],
+  supplier_purchase_orders: [], customer_orders: [], production_events: [],
+});
+
+const state = {
+  session: null,
+  tab: 'dashboard',
+  authMode: 'login',
+  authMessage: '',
+  loading: false,
+  loadError: '',
+  data: emptyData(),
+  month: localISODate(new Date()).slice(0, 7),
+  category: '',
+  invoiceStatus: '',
+  search: '',
+  modal: null,
+  pendingDelete: null,
+  expandedSuppliers: new Set(),
+  importFile: null,
+  importPreview: null,
+  calculator: { substance: '3', spec: 'BC/F', panjang: '18', lebar: '18', tinggi: '28.5', diskon: '3', margin: '40', showPricelist: false },
+  calculatorTarget: null,
+  poDraft: null,
+  toastTimer: null,
+  searchTimer: null,
+  busy: false,
+};
+
+const app = document.querySelector('#app');
+
+function toast(message, type = 'success') {
+  clearTimeout(state.toastTimer);
+  const host = document.querySelector('.toast-stack');
+  if (!host) return;
+  host.innerHTML = `<div class="toast toast-${type}" role="status">${icon(type === 'error' ? 'alert' : type === 'info' ? 'file' : 'check', 17)}<span>${esc(message)}</span><button type="button" aria-label="Tutup notifikasi" data-act="dismiss-toast">${icon('close', 15)}</button></div>`;
+  state.toastTimer = setTimeout(() => { const current = document.querySelector('.toast-stack'); if (current) current.innerHTML = ''; }, 3200);
+}
+
+function friendlyError(error) {
+  const message = String(error?.message || error || 'Terjadi kesalahan.');
+  if (/relation .* does not exist|schema cache|could not find the table/i.test(message)) {
+    return 'Tabel aplikasi belum dibuat. Jalankan supabase/schema.sql pada SQL Editor Supabase, lalu muat ulang halaman.';
+  }
+  if (/invalid login credentials/i.test(message)) return 'Email atau kata sandi belum cocok.';
+  if (/email not confirmed/i.test(message)) return 'Konfirmasi alamat email dari tautan yang dikirim Supabase, lalu masuk kembali.';
+  return message;
+}
+
+function render() {
+  document.body.dataset.tab = state.tab;
+  if (!isConfigured) {
+    app.innerHTML = `<main class="auth-screen"><section class="auth-card"><img src="/brand-mark.svg" class="auth-logo" alt=""><p class="eyebrow">PENYIAPAN APLIKASI</p><h1>Hubungkan ruang kerja</h1><p class="auth-copy">Isi NEXT_PUBLIC_SUPABASE_URL dan NEXT_PUBLIC_SUPABASE_ANON_KEY di .env.local, lalu jalankan ulang server.</p><div class="notice notice-info">${icon('alert', 17)}<span>Kunci service role tidak diperlukan pada aplikasi browser.</span></div></section></main>`;
+    return;
+  }
+  if (!state.session) {
+    app.innerHTML = `${renderSignIn(state.authMode, state.authMessage)}<div class="toast-stack"></div>`;
+    return;
+  }
+  const displayName = state.session.user?.email || 'Akun SPM';
+  const tabs = pageTabs.map(([key, label, glyph]) => `<button class="nav-tab ${state.tab === key ? 'active' : ''}" type="button" data-act="navigate" data-tab="${key}">${icon(glyph, 17)}<span>${esc(label)}</span></button>`).join('');
+  app.innerHTML = `<div class="app-shell">
+    <header class="topbar"><a class="brand" href="#" data-act="navigate" data-tab="dashboard"><img src="/brand-mark.svg" alt=""/><span><strong>CV Surya Pratama Mandiri</strong><small>Ruang kerja operasional</small></span></a>
+      <nav class="main-nav" aria-label="Menu utama">${tabs}</nav>
+      <div class="account-menu"><span class="account-dot"></span><span class="account-email">${esc(displayName)}</span><button type="button" class="icon-button" aria-label="Keluar" title="Keluar" data-act="signout">${icon('logout', 17)}</button></div>
+    </header>
+    <main class="workspace"><div class="workspace-tools"><div><span class="live-dot"></span><span>Data tersimpan di Supabase</span></div><label class="month-control"><span>Periode</span><input aria-label="Pilih periode" data-filter="month" type="month" value="${esc(state.month)}"></label></div>
+      ${state.loadError ? `<div class="notice notice-warn setup-notice">${icon('alert', 18)}<span>${esc(state.loadError)}</span></div>` : ''}
+      ${state.loading ? `<div class="loading-grid">${Array.from({ length: 6 }, () => '<div class="skeleton-card"></div>').join('')}</div>` : renderPage(state.tab, state.data, state)}
+      <footer class="app-footer"><span>CV Surya Pratama Mandiri</span><span>Keuangan · PO · Produksi</span></footer>
+    </main>${renderModal()}<div class="toast-stack"></div>
+  </div>`;
+}
+
+function renderModal() {
+  if (!state.modal) return '';
+  const { title, body, action = '', submit = 'Simpan', width = '' } = state.modal;
+  const form = action
+    ? `<form class="form-stack modal-form" data-form="modal" data-action="${esc(action)}" ${state.modal.attrs || ''}>${body}<div class="modal-actions"><button type="button" class="button secondary" data-act="close-modal">${icon('close', 16)}<span>Batal</span></button><button class="button primary" type="submit" ${state.busy ? 'disabled' : ''}>${icon('save', 16)}<span>${esc(submit)}</span></button></div></form>`
+    : `${body}<div class="modal-actions"><button type="button" class="button secondary" data-act="close-modal">${icon('close', 16)}<span>Tutup</span></button></div>`;
+  return `<div class="modal-backdrop" data-act="backdrop"><section class="modal-card ${width}" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-modal-card><header class="modal-heading"><div><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p><h2 id="modal-title">${esc(title)}</h2></div><button type="button" class="icon-button" aria-label="Tutup" data-act="close-modal">${icon('close', 18)}</button></header>${form}</section></div>`;
+}
+
+async function refreshData() {
+  state.loading = true;
+  state.loadError = '';
+  render();
+  try {
+    state.data = { ...emptyData(), ...await loadWorkspace() };
+  } catch (error) {
+    state.loadError = friendlyError(error);
+  } finally {
+    state.loading = false;
+    render();
+  }
+}
+
+function inputField(label, name, value = '', type = 'text', options = {}) {
+  const attrs = options.attrs || '';
+  const placeholder = options.placeholder ? `placeholder="${esc(options.placeholder)}"` : '';
+  const required = options.required ? 'required' : '';
+  const min = options.min !== undefined ? `min="${options.min}"` : '';
+  const step = options.step ? `step="${options.step}"` : '';
+  const full = options.full ? 'field-wide' : '';
+  const hint = options.hint ? `<small>${esc(options.hint)}</small>` : '';
+  if (type === 'textarea') return `<label class="field ${full}"><span>${esc(label)}</span><textarea name="${esc(name)}" ${required} ${placeholder} ${attrs}>${esc(value)}</textarea>${hint}</label>`;
+  return `<label class="field ${full}"><span>${esc(label)}</span><input name="${esc(name)}" type="${type}" value="${esc(value)}" ${required} ${min} ${step} ${placeholder} ${attrs}>${hint}</label>`;
+}
+
+function selectField(label, name, choices, selected, options = {}) {
+  return `<label class="field ${options.full ? 'field-wide' : ''}"><span>${esc(label)}</span><select name="${esc(name)}" ${options.required ? 'required' : ''}>${choices.map(([value, title]) => `<option value="${esc(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${esc(title)}</option>`).join('')}</select>${options.hint ? `<small>${esc(options.hint)}</small>` : ''}</label>`;
+}
+
+function openModal(modal) {
+  state.modal = modal;
+  render();
+  setTimeout(() => document.querySelector('.modal-card input:not([type="hidden"]), .modal-card select, .modal-card textarea')?.focus(), 40);
+}
+
+function cashflowModal(row = {}) {
+  const category = row.category || CASH_CATEGORIES[0];
+  const kind = category === 'Uang Masuk' ? 'credit' : (row.kind || 'debit');
+  openModal({
+    title: row.id ? 'Edit transaksi kas' : 'Transaksi kas baru', action: 'save-cashflow', submit: row.id ? 'Simpan perubahan' : 'Simpan transaksi',
+    attrs: row.id ? `data-id="${row.id}"` : '',
+    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true })}${inputField('Nama pengajuan', 'requester', row.requester || '', 'text', { placeholder: 'Nama pemohon' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk menambah saldo. Kategori lain dicatat sebagai debit.</p>`,
+  });
+}
+
+function invoiceModal(row = {}) {
+  openModal({
+    title: row.id ? 'Edit invoice customer' : 'Invoice baru', action: 'save-invoice', submit: row.id ? 'Simpan perubahan' : 'Simpan invoice',
+    attrs: row.id ? `data-id="${row.id}"` : '',
+    body: `<div class="form-grid">${inputField('Tanggal invoice', 'invoice_date', row.invoice_date || isoToday(), 'date', { required: true })}${inputField('Jatuh tempo', 'due_date', row.due_date || '', 'date')}${inputField('Nama customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nomor invoice', 'invoice_number', row.invoice_number || '', 'text', { required: true })}${inputField('Nomor PO', 'po_number', row.po_number || '')}${inputField('Nilai invoice', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Sudah dibayar', 'paid_amount', row.paid_amount || 0, 'number', { min: 0, step: '0.01' })}${inputField('Tanggal pembayaran terakhir', 'paid_date', row.paid_date || '', 'date')}</div><p class="form-hint">Status dihitung dari sisa tagihan dan tanggal jatuh tempo.</p>`,
+  });
+}
+
+function supplierEntryModal(type, supplier = '') {
+  const payment = type === 'payment';
+  openModal({
+    title: payment ? `Catat pembayaran · ${supplier}` : 'Tagihan pemasok baru', action: 'save-supplier-entry', submit: payment ? 'Simpan pembayaran' : 'Simpan tagihan',
+    body: `<div class="form-grid">${inputField('Nama pemasok', 'supplier', supplier, 'text', { required: true, placeholder: 'Nama vendor' })}${inputField('Tanggal', 'entry_date', isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal pembayaran' : 'Nominal tagihan', 'amount', '', 'number', { required: true, min: 0.01, step: '0.01' })}${inputField('Keterangan', 'description', '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice supplier atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>`,
+  });
+}
+
+function customerOrderModal(row = {}) {
+  openModal({
+    title: row.id ? 'Edit PO customer' : 'PO customer baru', action: 'save-customer-order', submit: row.id ? 'Simpan perubahan' : 'Simpan PO', attrs: row.id ? `data-id="${row.id}"` : '',
+    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date')}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Diperlukan untuk menilai keterlambatan.' })}${inputField('Nomor PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nama barang', 'item', row.item || '', 'text', { required: true })}${inputField('Ukuran / spesifikasi', 'size', row.size || '')}${inputField('Qty dipesan', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Qty diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Qty terkirim', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}${inputField('Harga per unit', 'unit_price', row.unit_price || 0, 'number', { min: 0, step: '0.01' })}${inputField('Nilai pesanan', 'amount', row.amount || 0, 'number', { min: 0, step: '0.01' })}</div><p class="form-hint">Qty produksi dan qty terkirim berbeda. Data DELIVERY dari workbook masuk sebagai qty terkirim; jumlah produksi dapat diisi saat dicatat.</p>`,
+  });
+}
+
+function productionEventModal(orderId = '', row = {}) {
+  const orderChoices = state.data.customer_orders.map((item) => [item.id, `${item.po_number || 'Tanpa PO'} · ${item.customer} · ${item.item}`]);
+  if (orderId && !orderChoices.some(([id]) => id === orderId)) orderChoices.unshift([orderId, 'PO terpilih']);
+  openModal({
+    title: row.id ? 'Edit catatan kendala' : 'Catat kendala produksi', action: 'save-production-event', submit: row.id ? 'Simpan perubahan' : 'Simpan kendala', attrs: row.id ? `data-id="${row.id}"` : '',
+    body: `<div class="form-grid">${selectField('PO customer', 'customer_order_id', orderChoices, row.customer_order_id || orderId, { required: true, full: true })}${inputField('Tanggal kendala', 'event_date', row.event_date || isoToday(), 'date', { required: true })}${selectField('Kategori penyebab', 'cause_category', CAUSES, row.cause_category || 'administrasi', { required: true })}${inputField('Jumlah unit terdampak', 'affected_qty', row.affected_qty || 0, 'number', { min: 0, step: '0.01' })}${inputField('Catatan / bukti', 'cause_detail', row.cause_detail || '', 'textarea', { required: true, full: true, placeholder: 'Apa yang terjadi, kapan diketahui, dan dampaknya ke pesanan?' })}${selectField('Status kendala', 'status', [['open', 'Terbuka'], ['resolved', 'Selesai']], row.status || 'open')}</div>`,
+  });
+}
+
+function supplierOrderModal(row = {}) {
+  const draft = {
+    id: row.id || '', po_number: row.po_number || '', supplier: row.supplier || '', customer: row.customer || '',
+    order_date: row.order_date || isoToday(), items: row.items?.length ? row.items : [{ item: 'SHEET', qlty: 'BF', sizeSheet: '', qtyOrder: '', qtyKirim: 0, harga: '' }],
+  };
+  state.poDraft = draft;
+  openModal({ title: draft.id ? 'Edit PO supplier' : 'PO supplier baru', action: 'save-po', submit: draft.id ? 'Simpan perubahan' : 'Simpan PO', attrs: draft.id ? `data-id="${draft.id}"` : '', width: 'modal-wide', body: supplierPoForm(draft) });
+}
+
+function supplierPoForm(draft) {
+  const itemRows = draft.items.map((item, index) => supplierPoItem(item, index)).join('');
+  return `<div class="form-grid">${inputField('Tanggal PO', 'order_date', draft.order_date, 'date', { required: true })}${inputField('Nomor PO', 'po_number', draft.po_number, 'text', { required: true })}${inputField('Pemasok', 'supplier', draft.supplier, 'text', { required: true })}${inputField('Customer', 'customer', draft.customer, 'text')}</div>
+    <div class="po-item-heading"><div><p class="eyebrow">RINCIAN</p><h3>Item bahan</h3></div><button type="button" class="button secondary" data-act="add-po-item">${icon('plus', 16)}<span>Tambah item</span></button></div>
+    <div class="po-item-list">${itemRows}</div>`;
+}
+
+function supplierPoItem(item, index) {
+  const calc = {
+    kurang: Math.max(Number(item.qtyOrder || 0) - Number(item.qtyKirim || 0), 0),
+    actual: Number(item.qtyKirim || 0) * Number(item.harga || 0),
+  };
+  return `<section class="po-item-row" data-po-item><div class="po-item-top"><strong>Item ${index + 1}</strong><button type="button" class="icon-button danger-icon" aria-label="Hapus item" title="Hapus item" data-act="remove-po-item">${icon('trash', 15)}</button></div>
+    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty kirim</span><input name="item-shipped" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyKirim || 0)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc type="number" min="0" step="0.01" value="${esc(item.harga)}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
+    <div class="po-item-calc"><span>Kurang kirim <b data-calc-short>${new Intl.NumberFormat('id-ID').format(calc.kurang)}</b></span><span>Nilai terkirim <b data-calc-value>${rupiah(calc.actual)}</b></span></div></section>`;
+}
+
+function confirmDelete(table, id) {
+  const labels = {
+    cashflow_transactions: 'transaksi kas', supplier_ledger_entries: 'catatan pemasok', sales_invoices: 'invoice',
+    supplier_purchase_orders: 'PO supplier', customer_orders: 'PO customer', production_events: 'catatan kendala',
+  };
+  state.pendingDelete = { table, id };
+  openModal({ title: `Hapus ${labels[table] || 'data'}?`, action: 'confirm-delete', submit: 'Hapus data', body: `<p class="confirm-copy">Data ini akan dihapus dari akun Anda. Tindakan ini tidak dapat dibatalkan.</p>`, attrs: `data-table="${esc(table)}" data-id="${esc(id)}"` });
+}
+
+function editByTable(table, id) {
+  const row = state.data[table]?.find((item) => item.id === id);
+  if (!row) return;
+  if (table === 'cashflow_transactions') cashflowModal(row);
+  if (table === 'sales_invoices') invoiceModal(row);
+  if (table === 'customer_orders') customerOrderModal(row);
+  if (table === 'supplier_purchase_orders') supplierOrderModal(row);
+  if (table === 'production_events') productionEventModal(row.customer_order_id, row);
+}
+
+function exportData(kind) {
+  if (kind === 'cashflow') {
+    const rows = [['Tanggal', 'Kategori', 'Pengaju', 'Keterangan', 'Debit', 'Kredit'], ...state.data.cashflow_transactions.filter((row) => row.transaction_date?.startsWith(state.month)).map((row) => [row.transaction_date, row.category, row.requester, row.description, row.kind === 'debit' ? row.amount : '', row.kind === 'credit' ? row.amount : ''])];
+    downloadCsv(`spm-cashflow-${state.month}.csv`, rows);
+  } else if (kind === 'invoices') {
+    const rows = [['Tanggal', 'Jatuh tempo', 'Customer', 'No. invoice', 'No. PO', 'Nilai', 'Sudah dibayar', 'Outstanding', 'Status'], ...state.data.sales_invoices.filter((row) => row.invoice_date?.startsWith(state.month)).map((row) => [row.invoice_date, row.due_date, row.customer, row.invoice_number, row.po_number, row.amount, row.paid_amount, row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0), row.due_date && row.due_date < isoToday() ? 'Jatuh tempo' : row.paid_amount >= row.amount ? 'Lunas' : 'Belum dibayar'])];
+    downloadCsv(`spm-invoice-${state.month}.csv`, rows);
+  } else if (kind === 'production') {
+    const rows = [['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'Barang', 'Spesifikasi', 'Qty dipesan', 'Qty diproduksi', 'Qty terkirim', 'Kurang kirim'], ...state.data.customer_orders.filter((row) => row.order_date?.startsWith(state.month)).map((row) => [row.order_date, row.due_date, row.po_number, row.customer, row.item, row.size, row.qty_order, row.qty_produced, row.qty_delivered, Math.max(Number(row.qty_order) - Number(row.qty_delivered), 0)])];
+    downloadCsv(`spm-produksi-${state.month}.csv`, rows);
+  } else if (kind === 'supplier-po') {
+    const rows = [['Tanggal', 'No. PO', 'Pemasok', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order', 'Kurang kirim', 'Harga', 'Nilai sisa', 'PPN sisa', 'Qty kirim', 'Nilai kirim', 'PPN kirim', 'Total kirim + PPN']];
+    state.data.supplier_purchase_orders.filter((order) => order.order_date?.startsWith(state.month)).forEach((order) => (order.items || []).forEach((item) => {
+      const ordered = Number(item.qtyOrder) || 0; const shipped = Number(item.qtyKirim) || 0; const price = Number(item.harga) || 0; const shortage = Math.max(ordered - shipped, 0); const openValue = shortage * price; const sentValue = shipped * price;
+      rows.push([order.order_date, order.po_number, order.supplier, order.customer, item.item, item.qlty, item.sizeSheet, ordered, shortage, price, openValue, openValue * .11, shipped, sentValue, sentValue * .11, sentValue * 1.11]);
+    }));
+    downloadCsv(`spm-po-supplier-${state.month}.csv`, rows);
+  } else if (kind === 'supplier-ledger') {
+    const rows = [['Tanggal', 'Pemasok', 'Jenis', 'Nominal', 'Keterangan'], ...state.data.supplier_ledger_entries.filter((row) => row.entry_date?.startsWith(state.month)).map((row) => [row.entry_date, row.supplier, row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran', row.amount, row.description])];
+    downloadCsv(`spm-piutang-pemasok-${state.month}.csv`, rows);
+  } else if (kind === 'events') {
+    const causeLabel = (value) => CAUSES.find(([key]) => key === value)?.[1] || value;
+    const rows = [['Tanggal', 'No. PO', 'Customer', 'Barang', 'Kategori penyebab', 'Catatan', 'Qty terdampak', 'Status'], ...state.data.production_events.filter((row) => row.event_date?.startsWith(state.month)).map((row) => {
+      const order = state.data.customer_orders.find((item) => item.id === row.customer_order_id);
+      return [row.event_date, order?.po_number, order?.customer, order?.item, causeLabel(row.cause_category), row.cause_detail, row.affected_qty, row.status === 'open' ? 'Terbuka' : 'Selesai'];
+    })];
+    downloadCsv(`spm-kendala-produksi-${state.month}.csv`, rows);
+  } else if (kind === 'dashboard-invoices') {
+    const rows = [['Customer', 'No. invoice', 'No. PO', 'Tanggal invoice', 'Jatuh tempo', 'Nilai invoice', 'Outstanding', 'Status'], ...state.data.sales_invoices.filter((row) => Number(row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0)) > 0).map((row) => [row.customer, row.invoice_number, row.po_number, row.invoice_date, row.due_date, row.amount, row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0), row.due_date && row.due_date < isoToday() ? 'Jatuh tempo' : 'Belum dibayar'])];
+    downloadCsv('spm-outstanding-invoice.csv', rows);
+  } else if (kind === 'pricelist') {
+    const rows = [['No', 'Fluting', 'Medium', 'Liner', ...priceSpecs], ...pricelist.map((row) => [row[0], ...row[1], ...row[2]])];
+    downloadCsv('spm-pricelist-karton.csv', rows);
+  }
+}
+
+async function saveModal(form) {
+  const formData = new FormData(form);
+  const values = Object.fromEntries(formData.entries());
+  const id = form.dataset.id || '';
+  const action = form.dataset.action;
+  const num = (key) => toNumber(values[key]);
+  if (action === 'save-cashflow') {
+    const category = values.category;
+    const result = await saveRow('cashflow_transactions', {
+      transaction_date: values.transaction_date, category, requester: values.requester.trim(), description: values.description.trim(),
+      amount: num('amount'), kind: category === 'Uang Masuk' ? 'credit' : 'debit',
+    }, id);
+    return result;
+  }
+  if (action === 'save-opening') {
+    const userId = state.session.user.id;
+    const { error } = await supabase.from('company_settings').upsert({
+      owner_id: userId, opening_balance: num('opening_balance'), opening_balance_date: values.opening_balance_date,
+    }, { onConflict: 'owner_id' });
+    if (error) throw error;
+    return;
+  }
+  if (action === 'save-supplier-entry') {
+    return saveRow('supplier_ledger_entries', {
+      supplier: values.supplier.trim(), entry_date: values.entry_date, entry_type: values.entry_type,
+      amount: num('amount'), description: values.description.trim(),
+    });
+  }
+  if (action === 'save-invoice') {
+    const paidAmount = Math.min(num('paid_amount'), num('amount'));
+    return saveRow('sales_invoices', {
+      invoice_date: values.invoice_date, due_date: values.due_date || null, paid_date: values.paid_date || null,
+      customer: values.customer.trim(), invoice_number: values.invoice_number.trim(), po_number: values.po_number.trim(),
+      amount: num('amount'), paid_amount: paidAmount, outstanding_amount: null,
+    }, id);
+  }
+  if (action === 'save-customer-order') {
+    return saveRow('customer_orders', {
+      order_date: values.order_date || null, due_date: values.due_date || null, po_number: values.po_number.trim(), customer: values.customer.trim(),
+      item: values.item.trim(), size: values.size.trim(), qty_order: num('qty_order'), qty_produced: num('qty_produced'),
+      qty_delivered: num('qty_delivered'), unit_price: num('unit_price'), amount: num('amount') || num('qty_order') * num('unit_price'),
+    }, id);
+  }
+  if (action === 'save-production-event') {
+    if (!values.customer_order_id) throw new Error('Pilih PO customer untuk mengaitkan kendala.');
+    return saveRow('production_events', {
+      customer_order_id: values.customer_order_id, event_date: values.event_date,
+      cause_category: values.cause_category, cause_detail: values.cause_detail.trim(), affected_qty: num('affected_qty'), status: values.status,
+    }, id);
+  }
+  if (action === 'save-po') {
+    const items = [...form.querySelectorAll('[data-po-item]')].map((section) => ({
+      item: section.querySelector('[name="item-item"]').value.trim(),
+      qlty: section.querySelector('[name="item-qlty"]').value,
+      sizeSheet: section.querySelector('[name="item-size"]').value.trim(),
+      qtyOrder: toNumber(section.querySelector('[name="item-ordered"]').value),
+      qtyKirim: toNumber(section.querySelector('[name="item-shipped"]').value),
+      harga: toNumber(section.querySelector('[name="item-price"]').value),
+    }));
+    if (!items.length) throw new Error('Tambahkan setidaknya satu item pada PO.');
+    return saveRow('supplier_purchase_orders', {
+      order_date: values.order_date, po_number: values.po_number.trim(), supplier: values.supplier.trim(), customer: values.customer.trim(), items,
+    }, id);
+  }
+  if (action === 'save-shipped') {
+    const order = state.data.supplier_purchase_orders.find((item) => item.id === values.po_id);
+    if (!order) throw new Error('PO supplier tidak ditemukan.');
+    const items = [...(order.items || [])];
+    items[Number(values.item_index)].qtyKirim = num('qtyKirim');
+    return saveRow('supplier_purchase_orders', { items }, order.id);
+  }
+  if (action === 'save-quantities') {
+    return saveRow('customer_orders', { qty_produced: num('qty_produced'), qty_delivered: num('qty_delivered') }, values.order_id);
+  }
+  if (action === 'confirm-delete') {
+    const pending = state.pendingDelete;
+    if (!pending) throw new Error('Data yang akan dihapus tidak ditemukan.');
+    await deleteRow(pending.table, pending.id);
+    state.pendingDelete = null;
+    return;
+  }
+  throw new Error('Form ini belum memiliki aksi penyimpanan.');
+}
+
+async function runImport() {
+  const preview = state.importPreview;
+  if (!preview?.records.length) throw new Error('Tidak ada baris yang dapat diimpor.');
+  const conflict = preview.type === 'supplier_purchase_orders' ? 'owner_id,po_number' : 'owner_id,source_key';
+  await upsertRows(preview.type, preview.records, conflict);
+  if (preview.type === 'cashflow_transactions' && preview.openingBalance != null) {
+    const { error } = await supabase.from('company_settings').upsert({
+      owner_id: state.session.user.id, opening_balance: preview.openingBalance,
+      opening_balance_date: preview.openingBalanceDate || `${state.month}-01`,
+    }, { onConflict: 'owner_id' });
+    if (error) throw error;
+  }
+  toast(`${preview.records.length} baris berhasil diimpor.`, 'success');
+  state.importPreview = null;
+  state.importFile = null;
+  await refreshData();
+}
+
+function updatePoPreview(target) {
+  const item = target.closest('[data-po-item]');
+  if (!item) return;
+  const ordered = toNumber(item.querySelector('[name="item-ordered"]').value);
+  const shipped = toNumber(item.querySelector('[name="item-shipped"]').value);
+  const price = toNumber(item.querySelector('[name="item-price"]').value);
+  const short = item.querySelector('[data-calc-short]');
+  const actual = item.querySelector('[data-calc-value]');
+  if (short) short.textContent = new Intl.NumberFormat('id-ID').format(Math.max(ordered - shipped, 0));
+  if (actual) actual.textContent = rupiah(shipped * price);
+}
+
+function preservePoDraft() {
+  const form = document.querySelector('.modal-form[data-action="save-po"]');
+  if (!form) return;
+  const data = new FormData(form);
+  state.poDraft = {
+    id: form.dataset.id || '', po_number: data.get('po_number'), supplier: data.get('supplier'), customer: data.get('customer'), order_date: data.get('order_date'),
+    items: [...form.querySelectorAll('[data-po-item]')].map((section) => ({
+      item: section.querySelector('[name="item-item"]').value, qlty: section.querySelector('[name="item-qlty"]').value,
+      sizeSheet: section.querySelector('[name="item-size"]').value, qtyOrder: section.querySelector('[name="item-ordered"]').value,
+      qtyKirim: section.querySelector('[name="item-shipped"]').value, harga: section.querySelector('[name="item-price"]').value,
+    })),
+  };
+}
+
+function setSearch(target) {
+  state.search = target.value;
+  const filter = target.dataset.filter;
+  clearTimeout(state.searchTimer);
+  state.searchTimer = setTimeout(() => {
+    render();
+    const input = document.querySelector(`[data-filter="${filter}"]`);
+    if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  }, 160);
+}
+
+async function handleClick(event) {
+  const button = event.target.closest('[data-act]');
+  if (!button) return;
+  const action = button.dataset.act;
+  if (action === 'backdrop' && event.target === button) { state.modal = null; render(); return; }
+  if (action === 'dismiss-toast') { document.querySelector('.toast-stack').innerHTML = ''; return; }
+  if (action === 'close-modal') { state.modal = null; state.pendingDelete = null; render(); return; }
+  if (action === 'auth-mode') { state.authMode = button.dataset.mode; state.authMessage = ''; render(); return; }
+  if (action === 'navigate') { state.tab = button.dataset.tab; state.search = ''; state.modal = null; render(); return; }
+  if (action === 'select-month') { state.month = button.dataset.month; render(); return; }
+  if (action === 'change-year') {
+    const [year, month] = state.month.split('-').map(Number);
+    state.month = `${year + Number(button.dataset.delta)}-${String(month).padStart(2, '0')}`;
+    render(); return;
+  }
+  if (action === 'signout') { await supabase.auth.signOut(); state.data = emptyData(); return; }
+  if (action === 'new-cashflow') { cashflowModal(); return; }
+  if (action === 'new-invoice') { invoiceModal(); return; }
+  if (action === 'new-supplier-bill') { supplierEntryModal('bill'); return; }
+  if (action === 'new-supplier-payment') { supplierEntryModal('payment', button.dataset.supplier || ''); return; }
+  if (action === 'new-production') { customerOrderModal(); return; }
+  if (action === 'new-event') { productionEventModal(button.dataset.order || ''); return; }
+  if (action === 'new-po') { supplierOrderModal(); return; }
+  if (action === 'edit-opening') {
+    const row = state.data.company_settings[0] || {};
+    openModal({ title: 'Atur saldo awal', action: 'save-opening', submit: 'Simpan saldo awal', body: `<div class="form-grid">${inputField('Nilai saldo awal', 'opening_balance', row.opening_balance || 0, 'number', { required: true, step: '0.01' })}${inputField('Saldo per tanggal', 'opening_balance_date', row.opening_balance_date || isoToday(), 'date', { required: true })}</div><p class="form-hint">Saldo berjalan dihitung dari transaksi pada dan setelah tanggal saldo awal.</p>` });
+    return;
+  }
+  if (action === 'open-import') { state.tab = 'impor'; render(); return; }
+  if (action === 'filter-category') { state.category = state.category === button.dataset.category ? '' : button.dataset.category; render(); return; }
+  if (action === 'toggle-supplier') {
+    const name = button.dataset.supplier;
+    state.expandedSuppliers.has(name) ? state.expandedSuppliers.delete(name) : state.expandedSuppliers.add(name);
+    render(); return;
+  }
+  if (action === 'edit') { editByTable(button.dataset.table, button.dataset.id); return; }
+  if (action === 'delete') { confirmDelete(button.dataset.table, button.dataset.id); return; }
+  if (action === 'toggle-invoice') {
+    const invoice = state.data.sales_invoices.find((row) => row.id === button.dataset.id);
+    if (!invoice) return;
+    const isPaid = Number(invoice.outstanding_amount ?? Math.max(invoice.amount - (invoice.paid_amount || 0), 0)) <= 0;
+    try {
+      await saveRow('sales_invoices', {
+        paid_date: isPaid ? null : isoToday(), paid_amount: isPaid ? 0 : invoice.amount,
+        outstanding_amount: isPaid ? invoice.amount : 0,
+      }, invoice.id);
+      await refreshData(); toast(isPaid ? 'Invoice ditandai belum lunas.' : 'Invoice ditandai lunas.');
+    } catch (error) { toast(friendlyError(error), 'error'); }
+    return;
+  }
+  if (action === 'toggle-event') {
+    const row = state.data.production_events.find((item) => item.id === button.dataset.id);
+    if (!row) return;
+    try { await saveRow('production_events', { status: row.status === 'open' ? 'resolved' : 'open' }, row.id); await refreshData(); toast('Status kendala diperbarui.', 'info'); }
+    catch (error) { toast(friendlyError(error), 'error'); }
+    return;
+  }
+  if (action === 'edit-quantities') {
+    const row = state.data.customer_orders.find((item) => item.id === button.dataset.id);
+    if (!row) return;
+    openModal({ title: `Realisasi · ${row.po_number}`, action: 'save-quantities', submit: 'Simpan realisasi', body: `<input type="hidden" name="order_id" value="${row.id}"><div class="form-grid">${inputField('Jumlah diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Jumlah terkirim', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}</div><p class="form-hint">Simpan angka produksi dan pengiriman secara terpisah untuk membedakan kapasitas produksi dari proses distribusi.</p>` });
+    return;
+  }
+  if (action === 'edit-shipped') {
+    const order = state.data.supplier_purchase_orders.find((row) => row.id === button.dataset.id);
+    const item = order?.items?.[Number(button.dataset.index)];
+    if (!order || !item) return;
+    openModal({ title: `Update qty kirim · ${order.po_number}`, action: 'save-shipped', submit: 'Simpan qty kirim', body: `<input type="hidden" name="po_id" value="${order.id}"><input type="hidden" name="item_index" value="${button.dataset.index}"><div class="form-grid">${inputField('Jumlah dipesan', 'qtyOrder', item.qtyOrder, 'number', { min: 0, step: '0.01' })}${inputField('Jumlah terkirim', 'qtyKirim', item.qtyKirim || 0, 'number', { min: 0, step: '0.01', required: true })}</div><p class="form-hint">Kekurangan dan nilai kirim dihitung ulang saat disimpan.</p>` });
+    return;
+  }
+  if (action === 'add-po-item') {
+    const form = document.querySelector('.modal-form[data-action="save-po"]');
+    const list = form?.querySelector('.po-item-list');
+    if (list) list.insertAdjacentHTML('beforeend', supplierPoItem({ item: 'SHEET', qlty: 'BF', qtyOrder: '', qtyKirim: 0, harga: '' }, list.children.length));
+    return;
+  }
+  if (action === 'remove-po-item') {
+    const list = button.closest('.po-item-list');
+    if (list?.children.length > 1) button.closest('[data-po-item]').remove();
+    else toast('PO harus memiliki setidaknya satu item.', 'info');
+    [...(list?.querySelectorAll('[data-po-item]') || [])].forEach((row, index) => { const label = row.querySelector('.po-item-top strong'); if (label) label.textContent = `Item ${index + 1}`; });
+    return;
+  }
+  if (action === 'calculator-for') {
+    preservePoDraft(); state.calculatorTarget = Number(button.dataset.index); state.modal = null; state.tab = 'kalkulator'; render(); return;
+  }
+  if (action === 'calculator-reset') { state.calculator = { substance: '3', spec: 'BC/F', panjang: '18', lebar: '18', tinggi: '28.5', diskon: '3', margin: '40', showPricelist: state.calculator.showPricelist }; render(); return; }
+  if (action === 'toggle-pricelist') { state.calculator.showPricelist = !state.calculator.showPricelist; render(); return; }
+  if (action === 'use-price') {
+    const index = state.calculatorTarget;
+    if (index === null || !state.poDraft) { toast('Harga hasil kalkulasi siap digunakan pada PO.', 'info'); return; }
+    state.poDraft.items[index].harga = Number(button.dataset.price) || 0;
+    state.calculatorTarget = null; state.tab = 'supplier'; supplierOrderModal(state.poDraft); return;
+  }
+  if (action === 'export') { exportData(button.dataset.kind); return; }
+  if (action === 'open-import') { state.tab = 'impor'; render(); return; }
+  if (action === 'refresh-import') { if (state.importFile) await readImportFile(state.importFile, state.importPreview?.sheetName); return; }
+  if (action === 'confirm-import') {
+    button.disabled = true;
+    try { await runImport(); } catch (error) { toast(friendlyError(error), 'error'); button.disabled = false; }
+    return;
+  }
+  if (action === 'dismiss-toast') { document.querySelector('.toast-stack').innerHTML = ''; }
+}
+
+async function readImportFile(file, sheetName) {
+  if (!file) return;
+  state.importFile = file;
+  try {
+    state.importPreview = await inspectWorkbook(file, sheetName);
+    state.tab = 'impor';
+    render();
+  } catch (error) {
+    state.importPreview = null;
+    render();
+    toast(friendlyError(error), 'error');
+  }
+}
+
+function handleInput(event) {
+  const target = event.target;
+  if (target.matches('[data-filter="search"]')) { setSearch(target); return; }
+  if (target.matches('[data-calc]')) {
+    const key = target.dataset.calc;
+    const position = target.type === 'text' ? target.selectionStart : null;
+    state.calculator[key] = target.value;
+    render();
+    const input = document.querySelector(`[data-calc="${key}"]`);
+    if (input) { input.focus(); if (position !== null) input.setSelectionRange(position, position); }
+    return;
+  }
+  if (target.matches('[data-po-calc]')) updatePoPreview(target);
+}
+
+async function handleChange(event) {
+  const target = event.target;
+  if (target.matches('[data-filter="month"]')) { state.month = target.value; render(); return; }
+  if (target.matches('[data-filter="cashCategory"]')) { state.category = target.value; render(); return; }
+  if (target.matches('[data-filter="invoiceStatus"]')) { state.invoiceStatus = target.value; render(); return; }
+  if (target.matches('[data-import-file]')) { await readImportFile(target.files?.[0]); return; }
+  if (target.matches('[data-import-sheet]')) { await readImportFile(state.importFile, target.value); return; }
+  if (target.matches('[data-calc]')) { state.calculator[target.dataset.calc] = target.value; render(); }
+}
+
+async function handleSubmit(event) {
+  const form = event.target.closest('[data-form]');
+  if (!form) return;
+  event.preventDefault();
+  if (form.dataset.form === 'auth') {
+    const values = Object.fromEntries(new FormData(form).entries());
+    state.busy = true; render();
+    try {
+      const result = form.dataset.mode === 'signup'
+        ? await supabase.auth.signUp({ email: values.email, password: values.password })
+        : await supabase.auth.signInWithPassword({ email: values.email, password: values.password });
+      if (result.error) throw result.error;
+      if (form.dataset.mode === 'signup' && !result.data.session) {
+        state.authMessage = 'Akun dibuat. Buka tautan konfirmasi dari email sebelum masuk.';
+        toast('Periksa email Anda untuk konfirmasi akun.', 'info');
+      } else state.authMessage = '';
+    } catch (error) { toast(friendlyError(error), 'error'); }
+    finally { state.busy = false; render(); }
+    return;
+  }
+  if (form.dataset.form !== 'modal') return;
+  state.busy = true;
+  const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
+  try {
+    await saveModal(form);
+    const action = form.dataset.action;
+    state.modal = null;
+    await refreshData();
+    toast(action === 'confirm-delete' ? 'Data berhasil dihapus.' : form.dataset.id ? 'Data berhasil diperbarui.' : 'Data berhasil disimpan.', action === 'confirm-delete' ? 'success' : form.dataset.id ? 'info' : 'success');
+  } catch (error) {
+    state.busy = false;
+    toast(friendlyError(error), 'error');
+    if (submit) submit.disabled = false;
+  } finally { state.busy = false; }
+}
+
+app.addEventListener('click', handleClick);
+app.addEventListener('input', handleInput);
+app.addEventListener('change', handleChange);
+app.addEventListener('submit', handleSubmit);
+
+if (isConfigured) {
+  supabase.auth.onAuthStateChange((_event, session) => {
+    state.session = session;
+    state.modal = null;
+    render();
+    if (session) refreshData();
+    else { state.data = emptyData(); state.loadError = ''; }
+  });
+  supabase.auth.getSession().then(({ data, error }) => {
+    if (error) { toast(friendlyError(error), 'error'); return; }
+    state.session = data.session;
+    render();
+    if (data.session) refreshData();
+  });
+}
+
+render();
+
