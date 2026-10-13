@@ -245,6 +245,7 @@ tbody tr:hover td.row-actions { background: #faf8f1; }
 .status-button:hover { transform: scale(1.03); }
 .invoice-late { background: #fffaf0; }
 .invoice-paid { background: #f4f9f4; }
+.invoice-customer-heading td { border-top: 1px solid #e4dfd3; background: #f4f1e8; color: var(--navy); font-size: .76rem; font-weight: 800; letter-spacing: .02em; }
 .production-late { background: #fff7ef; }
 .production-done, .po-complete { background: #f3f8f3; }
 .production-partial, .po-partial { background: #fff9ed; }
