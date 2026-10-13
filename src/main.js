@@ -178,9 +178,24 @@ function invoiceModal(row = {}) {
 
 function supplierEntryModal(type, supplier = '') {
   const payment = type === 'payment';
+  const normalizedSupplier = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+  const supplierBalance = payment
+    ? state.data.supplier_ledger_entries
+      .filter((row) => normalizedSupplier(row.supplier) === normalizedSupplier(supplier))
+      .reduce((total, row) => total + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0)
+    : 0;
+  if (payment && supplierBalance <= 0) {
+    toast('Supplier ini tidak memiliki sisa piutang untuk dibayar.', 'info');
+    return;
+  }
+  const supplierNames = [...new Set(state.data.supplier_ledger_entries.map((row) => String(row.supplier || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'id'));
+  const supplierField = payment
+    ? `<label class="field field-wide"><span>Nama supplier</span><input value="${esc(supplier)}" disabled><input type="hidden" name="supplier" value="${esc(supplier)}"></label>`
+    : `${inputField('Nama supplier', 'supplier', '', 'text', { required: true, placeholder: 'Nama supplier', attrs: 'list="supplier-ledger-vendors"' })}<datalist id="supplier-ledger-vendors">${supplierNames.map((name) => `<option value="${esc(name)}"></option>`).join('')}</datalist>`;
   openModal({
-    title: payment ? `Catat pembayaran · ${supplier}` : 'Tagihan pemasok baru', action: 'save-supplier-entry', submit: payment ? 'Simpan pembayaran' : 'Simpan tagihan',
-    body: `<div class="form-grid">${inputField('Nama pemasok', 'supplier', supplier, 'text', { required: true, placeholder: 'Nama vendor' })}${inputField('Tanggal', 'entry_date', isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal pembayaran' : 'Nominal tagihan', 'amount', '', 'number', { required: true, min: 0.01, step: '0.01' })}${inputField('Keterangan', 'description', '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice supplier atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>`,
+    title: payment ? `Pembayaran supplier · ${supplier}` : 'Tagihan baru', action: 'save-supplier-entry', submit: payment ? 'Simpan pembayaran' : 'Simpan tagihan',
+    body: `<div class="form-grid">${supplierField}${inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', '', 'number', { required: true, min: 0.01, step: '0.01', attrs: payment ? `max="${supplierBalance}"` : '' })}${inputField('Keterangan (opsional)', 'description', '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${payment ? `<p class="form-hint">Sisa piutang supplier ini ${rupiah(supplierBalance)}. Pembayaran tidak boleh melebihi sisa tersebut.</p>` : ''}`,
   });
 }
 
@@ -305,10 +320,26 @@ async function saveModal(form) {
     return;
   }
   if (action === 'save-supplier-entry') {
-    return saveRow('supplier_ledger_entries', {
-      supplier: values.supplier.trim(), entry_date: values.entry_date, entry_type: values.entry_type,
-      amount: num('amount'), description: values.description.trim(),
+    const supplier = String(values.supplier || '').trim().replace(/\s+/g, ' ');
+    const amount = num('amount');
+    if (!supplier) throw new Error('Nama supplier wajib diisi.');
+    if (!values.entry_date) throw new Error('Tanggal transaksi wajib diisi.');
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error('Nominal harus lebih besar dari Rp 0.');
+    if (values.entry_type === 'payment') {
+      const key = supplier.toLocaleLowerCase('id-ID');
+      const balance = state.data.supplier_ledger_entries
+        .filter((row) => String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === key)
+        .reduce((total, row) => total + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0);
+      if (amount > balance) throw new Error(`Nominal bayar melebihi sisa piutang ${rupiah(Math.max(balance, 0))}.`);
+    }
+    const normalizedSupplier = supplier.toLocaleLowerCase('id-ID');
+    const existingSupplier = state.data.supplier_ledger_entries.find((row) => String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === normalizedSupplier)?.supplier;
+    const saved = await saveRow('supplier_ledger_entries', {
+      supplier, entry_date: values.entry_date, entry_type: values.entry_type,
+      amount, description: values.description.trim(),
     });
+    state.expandedSuppliers.add(String(existingSupplier || supplier).trim().replace(/\s+/g, ' '));
+    return saved;
   }
   if (action === 'save-invoice') {
     const paidAmount = Math.min(num('paid_amount'), num('amount'));

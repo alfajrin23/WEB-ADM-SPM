@@ -258,12 +258,16 @@ tbody tr:hover { background: #faf8f1; }
 .supplier-card { min-width: 0; padding: 17px; border: 1px solid #e4e0d7; border-radius: 21px 21px 21px 8px; background: rgba(255, 254, 250, .93); box-shadow: 0 7px 20px rgba(48, 54, 55, .03); }
 .supplier-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .supplier-card h3 { margin: 2px 0 0; font: 800 1.06rem Manrope, sans-serif; }
+.supplier-balance-pair { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 15px; }
 .supplier-balance { display: grid; gap: 4px; text-align: right; }
 .supplier-balance small { color: #7d898e; font-size: .65rem; }
 .supplier-balance strong { color: var(--navy); font: 600 .86rem 'DM Mono', monospace; }
+.supplier-balance.outstanding strong { color: #a33c3c; }
 .supplier-card-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; color: #808b90; font-size: .67rem; }
 .supplier-card-actions { display: flex; align-items: center; gap: 13px; margin-top: 12px; }
+.supplier-paid-badge { display: inline-flex; align-items: center; min-height: 36px; padding: 0 13px; border: 1px solid #cce2d5; border-radius: 11px; background: #edf6f0; color: #287857; font-size: .7rem; font-weight: 800; }
 .supplier-card > .table-wrap { margin-top: 14px; }
+.supplier-card .table-wrap table { min-width: 660px; }
 .empty-state { display: grid; justify-items: center; padding: 29px 16px; text-align: center; }
 .empty-icon { display: grid; width: 52px; height: 52px; place-items: center; border: 1px solid #e0e3df; border-radius: 17px 17px 17px 6px; background: #f1f3ed; color: #71838c; }
 .empty-state h3 { margin: 12px 0 5px; font: 800 .95rem Manrope, sans-serif; }
@@ -447,6 +451,9 @@ tbody tr:hover { background: #faf8f1; }
   .opening-card { align-items: flex-start; flex-direction: column; padding: 15px; }
   .opening-card .button { width: 100%; }
   .supplier-card { padding: 14px; }
+  .supplier-card-head { flex-direction: column; }
+  .supplier-balance-pair { width: 100%; justify-content: flex-start; }
+  .supplier-balance { text-align: left; }
   .supplier-card-actions { flex-wrap: wrap; }
   .supplier-card-actions .button { flex: 1 1 auto; }
   .app-footer { gap: 10px; font-size: .58rem; }

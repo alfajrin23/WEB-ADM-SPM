@@ -176,31 +176,46 @@ function cashflow(data, state) {
 
 function supplierReceivables(data) {
   const groups = new Map();
-  data.supplier_ledger_entries.forEach((row) => groups.set(row.supplier, [...(groups.get(row.supplier) || []), row]));
-  const summary = [...groups.entries()].map(([name, rows]) => ({
-    name, rows: rows.sort((a, b) => (a.entry_date || '').localeCompare(b.entry_date || '')),
-    billed: rows.filter((row) => row.entry_type === 'bill').reduce((sum, row) => sum + Number(row.amount || 0), 0),
-    paid: rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0),
-  })).map((row) => ({ ...row, balance: row.billed - row.paid }));
-  return summary;
+  const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+  (data.supplier_ledger_entries || []).forEach((row) => {
+    const key = supplierKey(row.supplier);
+    if (!key) return;
+    const group = groups.get(key) || { name: String(row.supplier).trim().replace(/\s+/g, ' '), rows: [] };
+    group.rows.push(row);
+    groups.set(key, group);
+  });
+  return [...groups.values()].map((group) => {
+    const rows = group.rows.sort((a, b) => (a.entry_date || '').localeCompare(b.entry_date || '')
+      || (a.created_at || '').localeCompare(b.created_at || '')
+      || String(a.id || '').localeCompare(String(b.id || '')));
+    const billed = rows.filter((row) => row.entry_type === 'bill').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const paid = rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    return { name: group.name, rows, billed, paid, balance: Math.max(billed - paid, 0) };
+  });
 }
 
 function payables(data, state) {
   const groups = supplierReceivables(data);
   const open = groups.filter((row) => row.balance > 0);
   const openTotal = open.reduce((sum, row) => sum + row.balance, 0);
-  const supplierCards = groups.sort((a, b) => a.name.localeCompare(b.name)).map((supplier) => {
+  const supplierCards = groups.sort((a, b) => a.name.localeCompare(b.name, 'id')).map((supplier) => {
     const expanded = state.expandedSuppliers.has(supplier.name);
     let balance = 0;
     const details = supplier.rows.map((row) => {
-      balance += row.entry_type === 'bill' ? Number(row.amount) : -Number(row.amount);
-      return `<tr><td>${formatDate(row.entry_date)}</td><td>${row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran'}</td><td>${esc(row.description || '—')}</td><td class="numeric">${row.entry_type === 'payment' ? money(row.amount) : '—'}</td><td class="numeric">${money(balance)}</td><td>${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+      balance += row.entry_type === 'bill' ? Number(row.amount || 0) : -Number(row.amount || 0);
+      const billAmount = row.entry_type === 'bill' ? money(row.amount) : '—';
+      const paymentAmount = row.entry_type === 'payment' ? money(row.amount) : '—';
+      const description = row.description || (row.entry_type === 'bill' ? 'Tagihan baru' : 'Pembayaran');
+      return `<tr><td>${formatDate(row.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td><td>${esc(description)}</td><td class="numeric">${billAmount}</td><td class="numeric">${paymentAmount}</td><td class="numeric">${money(Math.max(balance, 0))}</td><td>${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
     }).join('');
-    return `<article class="supplier-card"><div class="supplier-card-head"><div><span class="eyebrow">PEMASOK</span><h3>${esc(supplier.name)}</h3></div><div class="supplier-balance"><small>Sisa piutang</small><strong>${money(supplier.balance)}</strong></div></div><div class="supplier-card-meta"><span>Total tagihan ${money(supplier.billed)}</span><span>${supplier.rows.length} catatan</span></div><div class="supplier-card-actions">${actionButton('Catat bayar', 'new-supplier-payment', `data-supplier="${esc(supplier.name)}"`, 'wallet', 'secondary')}<button type="button" class="text-button" data-act="toggle-supplier" data-supplier="${esc(supplier.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup rincian' : 'Rincian pembayaran'}</button></div>${expanded ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Keterangan</th><th>Dibayar</th><th>Sisa berjalan</th><th></th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
+    const paymentAction = supplier.balance > 0
+      ? actionButton('Bayar', 'new-supplier-payment', `data-supplier="${esc(supplier.name)}"`, 'wallet', 'secondary')
+      : '<span class="supplier-paid-badge">Lunas</span>';
+    return `<article class="supplier-card"><div class="supplier-card-head"><div><span class="eyebrow">SUPPLIER</span><h3>${esc(supplier.name)}</h3></div><div class="supplier-balance-pair"><div class="supplier-balance"><small>Total piutang</small><strong>${money(supplier.billed)}</strong></div><div class="supplier-balance outstanding"><small>Sisa</small><strong>${money(supplier.balance)}</strong></div></div></div><div class="supplier-card-meta"><span>Sudah dibayar ${money(supplier.paid)}</span><span>${supplier.rows.length} catatan</span></div><div class="supplier-card-actions">${paymentAction}<button type="button" class="text-button" aria-expanded="${expanded}" data-act="toggle-supplier" data-supplier="${esc(supplier.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup detail' : 'Detail pembayaran'}</button></div>${expanded ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="numeric">Tagihan</th><th class="numeric">Bayar</th><th class="numeric">Sisa</th><th></th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
   }).join('');
-  return `${pageHead('KEUANGAN', 'Piutang pemasok', 'Catat tagihan sheet dan pembayaran vendor untuk mengetahui sisa kewajiban.', `${actionButton('Export CSV', 'export', 'data-kind="supplier-ledger"', 'download', 'secondary')}${actionButton('Tagihan baru', 'new-supplier-bill', '', 'plus')}`)}
-    <div class="summary-grid">${statStrip('Piutang terbuka', money(openTotal))}${statStrip('Pemasok aktif', integer(open.length))}${statStrip('Sudah lunas', integer(groups.filter((row) => row.billed > 0 && row.balance <= 0).length))}</div>
-    <div class="supplier-list">${supplierCards || emptyState('Belum ada catatan pemasok', 'Tambahkan tagihan bahan pertama untuk mulai melacak saldo vendor.', 'new-supplier-bill', 'Tambah tagihan', 'package')}</div>`;
+  return `${pageHead('KEUANGAN', 'Piutang pemasok', 'Catat tagihan dan pembayaran supplier untuk melihat total, pembayaran, serta sisa piutang.', `${actionButton('Export CSV', 'export', 'data-kind="supplier-ledger"', 'download', 'secondary')}${actionButton('Tagihan baru', 'new-supplier-bill', '', 'plus')}`)}
+    <div class="summary-grid">${statStrip('Total Piutang Outstanding', money(openTotal))}${statStrip('Jumlah Supplier Aktif', integer(open.length))}${statStrip('Supplier Sudah Lunas', integer(groups.filter((row) => row.billed > 0 && row.balance === 0).length))}</div>
+    <div class="supplier-list">${supplierCards || emptyState('Belum ada catatan supplier', 'Tambahkan tagihan pertama untuk mulai mencatat saldo dan pembayaran supplier.', 'new-supplier-bill', 'Tagihan baru', 'package')}</div>`;
 }
 
 function invoices(data, state) {
