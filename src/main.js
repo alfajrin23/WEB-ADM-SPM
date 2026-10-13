@@ -258,11 +258,21 @@ function cashflowModal(row = {}) {
   });
 }
 
+function invoiceCustomerField(value = '') {
+  const customerNames = state.data.sales_invoices.reduce((names, invoice) => {
+    const name = String(invoice.customer || '').trim();
+    if (name && !names.has(name.toLocaleLowerCase('id-ID'))) names.set(name.toLocaleLowerCase('id-ID'), name);
+    return names;
+  }, new Map());
+  const customers = [...customerNames.values()].sort((a, b) => a.localeCompare(b, 'id-ID', { sensitivity: 'base' }));
+  return `<label class="field"><span>Nama customer</span><input name="customer" type="text" value="${esc(value)}" list="invoice-customer-suggestions" autocomplete="off" required><datalist id="invoice-customer-suggestions">${customers.map((customer) => `<option value="${esc(customer)}"></option>`).join('')}</datalist><small>Pilih nama customer yang sudah tersimpan atau ketik nama baru.</small></label>`;
+}
+
 function invoiceModal(row = {}) {
   openModal({
     title: row.id ? 'Edit invoice customer' : 'Invoice baru', action: 'save-invoice', submit: row.id ? 'Simpan perubahan' : 'Simpan invoice',
     attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal invoice', 'invoice_date', row.invoice_date || isoToday(), 'date', { required: true })}${inputField('Jatuh tempo', 'due_date', row.due_date || '', 'date')}${inputField('Nama customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nomor invoice', 'invoice_number', row.invoice_number || '', 'text', { required: true })}${inputField('Nomor PO', 'po_number', row.po_number || '')}${inputField('Nilai invoice', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01', money: true })}${inputField('Sudah dibayar', 'paid_amount', row.paid_amount || 0, 'number', { min: 0, step: '0.01', money: true })}${inputField('Tanggal pembayaran terakhir', 'paid_date', row.paid_date || '', 'date')}</div><p class="form-hint">Status dihitung dari sisa tagihan dan tanggal jatuh tempo.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal invoice', 'invoice_date', row.invoice_date || isoToday(), 'date', { required: true })}${inputField('Jatuh tempo', 'due_date', row.due_date || '', 'date')}${invoiceCustomerField(row.customer || '')}${inputField('Nomor invoice', 'invoice_number', row.invoice_number || '', 'text', { required: true })}${inputField('Nomor PO', 'po_number', row.po_number || '')}${inputField('Nilai invoice', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01', money: true })}${inputField('Sudah dibayar', 'paid_amount', row.paid_amount || 0, 'number', { min: 0, step: '0.01', money: true })}${inputField('Tanggal pembayaran terakhir', 'paid_date', row.paid_date || '', 'date')}</div><p class="form-hint">Status dihitung dari sisa tagihan dan tanggal jatuh tempo.</p>`,
   });
 }
 
