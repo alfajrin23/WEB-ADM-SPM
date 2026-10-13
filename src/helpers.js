@@ -101,8 +101,13 @@ export function toNumber(value) {
 }
 
 export function downloadCsv(filename, rows) {
-  const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
-  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const csv = rows.map((row) => row.map((value) => {
+    const isNumber = value && typeof value === 'object' && value.__csvNumeric === true;
+    let text = isNumber ? value.value : String(value ?? '');
+    if (!isNumber && typeof value === 'string' && /^[\t\r ]*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+  }).join(';')).join('\r\n');
+  const blob = new Blob([`\uFEFFsep=;\r\n${csv}`], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;

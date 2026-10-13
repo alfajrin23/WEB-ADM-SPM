@@ -4,8 +4,8 @@ import {
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
 import {
-  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, formatNumberInput, icon, isoToday, localISODate,
-  orderProgress, rupiah, toNumber,
+  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, isoToday, localISODate,
+  monthName, orderProgress, rupiah, statusForInvoice, toNumber,
 } from './helpers.js';
 import { pageTabs, renderPage, renderSignIn } from './views.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
@@ -28,7 +28,7 @@ const tablesByTab = {
 };
 const tableByAction = {
   'save-cashflow': 'cashflow_transactions', 'save-opening': 'company_settings',
-  'save-supplier-entry': 'supplier_ledger_entries', 'save-invoice': 'sales_invoices',
+  'save-supplier-entry': 'supplier_ledger_entries', 'save-invoice': 'sales_invoices', 'mark-invoice-paid': 'sales_invoices',
   'save-customer-order': 'customer_orders', 'save-production-event': 'production_events',
   'save-po': 'supplier_purchase_orders', 'save-shipped': 'supplier_purchase_orders',
   'save-quantities': 'customer_orders',
@@ -276,6 +276,14 @@ function invoiceModal(row = {}) {
   });
 }
 
+function invoicePaymentDateModal(invoice) {
+  openModal({
+    title: 'Catat tanggal pelunasan', action: 'mark-invoice-paid', submit: 'Simpan pelunasan',
+    attrs: `data-id="${esc(invoice.id)}"`,
+    body: `<p class="confirm-copy">Masukkan tanggal pelunasan untuk invoice <strong>${esc(invoice.invoice_number || '')}</strong>.</p><div class="form-grid">${inputField('Tanggal pelunasan', 'paid_date', invoice.paid_date || isoToday(), 'date', { required: true, full: true })}</div>`,
+  });
+}
+
 function supplierEntryModal(type, supplier = '', row = {}) {
   const payment = type === 'payment';
   const normalizedSupplier = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
@@ -363,39 +371,194 @@ function editByTable(table, id) {
   if (table === 'production_events') productionEventModal(row.customer_order_id, row);
 }
 
+const csvNumericCell = (value, minimumFractionDigits = 0, maximumFractionDigits = 2) => ({
+  __csvNumeric: true,
+  value: new Intl.NumberFormat('id-ID', { minimumFractionDigits, maximumFractionDigits }).format(Number(value) || 0),
+});
+const csvMoney = (value) => csvNumericCell(value, 2, 2);
+const csvQuantity = (value) => csvNumericCell(value, 0, 2);
+const csvDate = (value) => value ? formatDate(value) : '—';
+const reportPeriod = () => monthName(state.month);
+
+function downloadReport(filename, title, period, summary, headers, details, totalRow = null) {
+  const exportedAt = new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Jakarta',
+  }).format(new Date());
+  const rows = [
+    ['LAPORAN CV SURYA PRATAMA MANDIRI'],
+    ['Nama laporan', title],
+    ['Periode', period],
+    ['Waktu ekspor', exportedAt],
+    [],
+    ['REKAPAN'],
+    ['Indikator', 'Nilai'],
+    ...summary,
+    [],
+    ['RINCIAN DATA'],
+    headers,
+    ...details,
+    ...(totalRow ? [totalRow] : []),
+  ];
+  downloadCsv(filename, rows);
+}
+
 function exportData(kind) {
+  const period = reportPeriod();
   if (kind === 'cashflow') {
-    const rows = [['Tanggal', 'Kategori', 'Pengaju', 'Keterangan', 'Debit', 'Kredit'], ...state.data.cashflow_transactions.filter((row) => row.transaction_date?.startsWith(state.month)).map((row) => [row.transaction_date, row.category, row.requester, row.description, row.kind === 'debit' ? row.amount : '', row.kind === 'credit' ? row.amount : ''])];
-    downloadCsv(`spm-cashflow-${state.month}.csv`, rows);
+    const all = state.data.cashflow_transactions;
+    const rows = all.filter((row) => row.transaction_date?.startsWith(state.month))
+      .sort((a, b) => (a.transaction_date || '').localeCompare(b.transaction_date || '') || (a.created_at || '').localeCompare(b.created_at || ''));
+    const debit = rows.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const credit = rows.filter((row) => row.kind === 'credit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const settings = state.data.company_settings[0] || {};
+    const balance = Number(settings.opening_balance || 0) + all.filter((row) => !settings.opening_balance_date || row.transaction_date >= settings.opening_balance_date)
+      .reduce((sum, row) => sum + (row.kind === 'credit' ? 1 : -1) * Number(row.amount || 0), 0);
+    const details = rows.map((row) => [
+      csvDate(row.transaction_date), row.category, row.requester || '—', row.description || '—',
+      row.kind === 'debit' ? csvMoney(row.amount) : '', row.kind === 'credit' ? csvMoney(row.amount) : '',
+    ]);
+    downloadReport(`spm-cashflow-${state.month}.csv`, 'Cashflow dan transaksi kas', period, [
+      ['Jumlah transaksi', csvQuantity(rows.length)], ['Total uang masuk (Rp)', csvMoney(credit)],
+      ['Total uang keluar (Rp)', csvMoney(debit)], ['Arus kas bersih periode (Rp)', csvMoney(credit - debit)],
+      ['Saldo berjalan saat ekspor (Rp)', csvMoney(balance)],
+    ], ['Tanggal', 'Kategori', 'Pengaju', 'Keterangan', 'Debit (Rp)', 'Kredit (Rp)'], details,
+    ['TOTAL PERIODE', '', '', '', csvMoney(debit), csvMoney(credit)]);
   } else if (kind === 'invoices') {
-    const rows = [['Tanggal', 'Jatuh tempo', 'Customer', 'No. invoice', 'No. PO', 'Nilai', 'Sudah dibayar', 'Outstanding', 'Status'], ...state.data.sales_invoices.filter((row) => row.invoice_date?.startsWith(state.month)).map((row) => [row.invoice_date, row.due_date, row.customer, row.invoice_number, row.po_number, row.amount, row.paid_amount, row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0), row.due_date && row.due_date < isoToday() ? 'Jatuh tempo' : row.paid_amount >= row.amount ? 'Lunas' : 'Belum dibayar'])];
-    downloadCsv(`spm-invoice-${state.month}.csv`, rows);
+    const rows = [...state.data.sales_invoices].sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' })
+      || (a.invoice_date || '').localeCompare(b.invoice_date || '') || (a.invoice_number || '').localeCompare(b.invoice_number || '', 'id-ID'));
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const totalPaid = rows.reduce((sum, row) => sum + Number(row.paid_amount || 0), 0);
+    const totalOutstanding = rows.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0)), 0);
+    const statusCounts = rows.reduce((counts, row) => {
+      const status = statusForInvoice(row)[1]; counts[status] = (counts[status] || 0) + 1; return counts;
+    }, {});
+    const details = rows.map((row) => [
+      row.customer, csvDate(row.invoice_date), csvDate(row.due_date), csvDate(row.paid_date), row.invoice_number, row.po_number || '—',
+      csvMoney(row.amount), csvMoney(row.paid_amount), csvMoney(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0)), statusForInvoice(row)[1],
+    ]);
+    downloadReport('spm-invoice-semua-periode.csv', 'Tagihan customer', 'Semua periode', [
+      ['Jumlah invoice', csvQuantity(rows.length)], ['Jumlah customer', csvQuantity(new Set(rows.map((row) => row.customer).filter(Boolean)).size)],
+      ['Nilai seluruh invoice (Rp)', csvMoney(totalAmount)], ['Total pembayaran tercatat (Rp)', csvMoney(totalPaid)],
+      ['Total outstanding (Rp)', csvMoney(totalOutstanding)], ...Object.entries(statusCounts).map(([status, count]) => [`Invoice ${status.toLocaleLowerCase('id-ID')}`, csvQuantity(count)]),
+    ], ['Customer', 'Tanggal invoice', 'Jatuh tempo', 'Tanggal pelunasan', 'No. invoice', 'No. PO', 'Nilai invoice (Rp)', 'Sudah dibayar (Rp)', 'Outstanding (Rp)', 'Status'], details,
+    ['TOTAL SEMUA CUSTOMER', '', '', '', '', '', csvMoney(totalAmount), csvMoney(totalPaid), csvMoney(totalOutstanding), '']);
   } else if (kind === 'production') {
-    const rows = [['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'Barang', 'Spesifikasi', 'Qty dipesan', 'Qty diproduksi', 'Qty terkirim', 'Kurang kirim'], ...state.data.customer_orders.filter((row) => row.order_date?.startsWith(state.month)).map((row) => [row.order_date, row.due_date, row.po_number, row.customer, row.item, row.size, row.qty_order, row.qty_produced, row.qty_delivered, Math.max(Number(row.qty_order) - Number(row.qty_delivered), 0)])];
-    downloadCsv(`spm-produksi-${state.month}.csv`, rows);
+    const rows = state.data.customer_orders.filter((row) => row.order_date?.startsWith(state.month))
+      .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
+    const totals = rows.reduce((sum, row) => ({
+      ordered: sum.ordered + Number(row.qty_order || 0), produced: sum.produced + Number(row.qty_produced || 0),
+      delivered: sum.delivered + Number(row.qty_delivered || 0),
+      shortage: sum.shortage + Math.max(Number(row.qty_order || 0) - Number(row.qty_delivered || 0), 0),
+    }), { ordered: 0, produced: 0, delivered: 0, shortage: 0 });
+    const details = rows.map((row) => [
+      csvDate(row.order_date), csvDate(row.due_date), row.po_number || '—', row.customer || '—', row.item || '—', row.size || '—',
+      csvQuantity(row.qty_order), csvQuantity(row.qty_produced), csvQuantity(row.qty_delivered),
+      csvQuantity(Math.max(Number(row.qty_order || 0) - Number(row.qty_delivered || 0), 0)), orderProgress(row)[1],
+    ]);
+    downloadReport(`spm-produksi-${state.month}.csv`, 'Performa produksi dan pesanan customer', period, [
+      ['Jumlah baris pesanan', csvQuantity(rows.length)], ['Jumlah PO unik', csvQuantity(new Set(rows.map((row) => row.po_number).filter(Boolean)).size)],
+      ['Total qty dipesan', csvQuantity(totals.ordered)], ['Total qty diproduksi', csvQuantity(totals.produced)],
+      ['Total qty terkirim', csvQuantity(totals.delivered)], ['Total kekurangan kirim', csvQuantity(totals.shortage)],
+      ['Pesanan lewat janji', csvQuantity(rows.filter((row) => orderProgress(row)[0] === 'late').length)],
+    ], ['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'Barang', 'Spesifikasi', 'Qty dipesan', 'Qty diproduksi', 'Qty terkirim', 'Kurang kirim', 'Status pesanan'], details,
+    ['TOTAL PERIODE', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.produced), csvQuantity(totals.delivered), csvQuantity(totals.shortage), '']);
   } else if (kind === 'supplier-po') {
-    const rows = [['Tanggal', 'No. PO', 'Pemasok', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order', 'Kurang kirim', 'Harga', 'Nilai sisa', 'PPN sisa', 'Qty kirim', 'Nilai kirim', 'PPN kirim', 'Total kirim + PPN']];
-    state.data.supplier_purchase_orders.filter((order) => order.order_date?.startsWith(state.month)).forEach((order) => (order.items || []).forEach((item) => {
-      const ordered = Number(item.qtyOrder) || 0; const shipped = Number(item.qtyKirim) || 0; const price = Number(item.harga) || 0; const shortage = Math.max(ordered - shipped, 0); const openValue = shortage * price; const sentValue = shipped * price;
-      rows.push([order.order_date, order.po_number, order.supplier, order.customer, item.item, item.qlty, item.sizeSheet, ordered, shortage, price, openValue, openValue * .11, shipped, sentValue, sentValue * .11, sentValue * 1.11]);
+    const orders = state.data.supplier_purchase_orders.filter((order) => order.order_date?.startsWith(state.month))
+      .sort((a, b) => (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
+    const items = orders.flatMap((order) => (order.items || []).map((item) => {
+      const ordered = Number(item.qtyOrder) || 0; const shipped = Number(item.qtyKirim) || 0; const price = Number(item.harga) || 0;
+      const shortage = Math.max(ordered - shipped, 0); const openValue = shortage * price; const shippedValue = shipped * price;
+      return { order, item, ordered, shipped, price, shortage, openValue, openTax: openValue * .11, shippedValue, shippedTax: shippedValue * .11, payable: shippedValue * 1.11 };
     }));
-    downloadCsv(`spm-po-supplier-${state.month}.csv`, rows);
+    const totals = items.reduce((sum, row) => {
+      for (const key of ['ordered', 'shipped', 'shortage', 'openValue', 'openTax', 'shippedValue', 'shippedTax', 'payable']) sum[key] += row[key];
+      return sum;
+    }, { ordered: 0, shipped: 0, shortage: 0, openValue: 0, openTax: 0, shippedValue: 0, shippedTax: 0, payable: 0 });
+    const details = items.map(({ order, item, ordered, shipped, price, shortage, openValue, openTax, shippedValue, shippedTax, payable }) => [
+      csvDate(order.order_date), order.po_number || '—', order.supplier || '—', order.customer || '—', item.item || 'SHEET',
+      item.qlty || '—', item.sizeSheet || '—', csvQuantity(ordered), csvQuantity(shortage), csvMoney(price), csvMoney(openValue),
+      csvMoney(openTax), csvQuantity(shipped), csvMoney(shippedValue), csvMoney(shippedTax), csvMoney(payable),
+    ]);
+    downloadReport(`spm-po-supplier-${state.month}.csv`, 'PO supplier dan penerimaan bahan', period, [
+      ['Jumlah PO', csvQuantity(new Set(orders.map((order) => order.po_number).filter(Boolean)).size)],
+      ['Jumlah supplier', csvQuantity(new Set(orders.map((order) => String(order.supplier || '').trim().toLocaleLowerCase('id-ID')).filter(Boolean)).size)],
+      ['Jumlah baris item', csvQuantity(items.length)], ['Total qty dipesan', csvQuantity(totals.ordered)],
+      ['Total qty diterima', csvQuantity(totals.shipped)], ['Total qty kurang diterima', csvQuantity(totals.shortage)],
+      ['Nilai sisa sebelum PPN (Rp)', csvMoney(totals.openValue)], ['PPN atas nilai sisa (Rp)', csvMoney(totals.openTax)],
+      ['Total nilai diterima termasuk PPN (Rp)', csvMoney(totals.payable)],
+    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty dipesan', 'Kurang diterima', 'Harga/unit (Rp)', 'Nilai sisa (Rp)', 'PPN sisa (Rp)', 'Qty diterima', 'Nilai diterima (Rp)', 'PPN diterima (Rp)', 'Total diterima + PPN (Rp)'], details,
+    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.shortage), '', csvMoney(totals.openValue), csvMoney(totals.openTax), csvQuantity(totals.shipped), csvMoney(totals.shippedValue), csvMoney(totals.shippedTax), csvMoney(totals.payable)]);
   } else if (kind === 'supplier-ledger') {
-    const rows = [['Tanggal', 'Pemasok', 'Jenis', 'Nominal', 'Keterangan'], ...state.data.supplier_ledger_entries.filter((row) => row.entry_date?.startsWith(state.month)).map((row) => [row.entry_date, row.supplier, row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran', row.amount, row.description])];
-    downloadCsv(`spm-piutang-pemasok-${state.month}.csv`, rows);
+    const all = state.data.supplier_ledger_entries;
+    const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+    const chronological = [...all].sort((a, b) => supplierKey(a.supplier).localeCompare(supplierKey(b.supplier), 'id-ID')
+      || (a.entry_date || '').localeCompare(b.entry_date || '') || (a.created_at || '').localeCompare(b.created_at || '') || String(a.id || '').localeCompare(String(b.id || '')));
+    const balances = new Map(); const balanceAfterEntry = new Map();
+    chronological.forEach((row) => {
+      const key = supplierKey(row.supplier); const next = (balances.get(key) || 0) + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0);
+      balances.set(key, next); balanceAfterEntry.set(row.id, next);
+    });
+    const rows = chronological.filter((row) => row.entry_date?.startsWith(state.month));
+    const bills = rows.filter((row) => row.entry_type === 'bill').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const payments = rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const currentBalances = [...balances.values()].map((value) => Math.max(value, 0));
+    const currentOutstanding = currentBalances.reduce((sum, value) => sum + value, 0);
+    const details = rows.map((row) => [
+      csvDate(row.entry_date), row.supplier, row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran',
+      row.entry_type === 'bill' ? csvMoney(row.amount) : '', row.entry_type === 'payment' ? csvMoney(row.amount) : '',
+      csvMoney(Math.max(balanceAfterEntry.get(row.id) || 0, 0)), row.description || '—',
+    ]);
+    downloadReport(`spm-piutang-pemasok-${state.month}.csv`, 'Tagihan dan pembayaran supplier', period, [
+      ['Jumlah transaksi periode', csvQuantity(rows.length)], ['Total tagihan periode (Rp)', csvMoney(bills)],
+      ['Total pembayaran periode (Rp)', csvMoney(payments)], ['Perubahan saldo periode (Rp)', csvMoney(bills - payments)],
+      ['Sisa piutang seluruh supplier saat ekspor (Rp)', csvMoney(currentOutstanding)],
+      ['Supplier dengan piutang aktif saat ekspor', csvQuantity(currentBalances.filter((value) => value > 0).length)],
+    ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Keterangan'], details,
+    ['TOTAL PERIODE', '', '', csvMoney(bills), csvMoney(payments), '', '']);
   } else if (kind === 'events') {
-    const causeLabel = (value) => CAUSES.find(([key]) => key === value)?.[1] || value;
-    const rows = [['Tanggal', 'No. PO', 'Customer', 'Barang', 'Kategori penyebab', 'Catatan', 'Qty terdampak', 'Status'], ...state.data.production_events.filter((row) => row.event_date?.startsWith(state.month)).map((row) => {
-      const order = state.data.customer_orders.find((item) => item.id === row.customer_order_id);
-      return [row.event_date, order?.po_number, order?.customer, order?.item, causeLabel(row.cause_category), row.cause_detail, row.affected_qty, row.status === 'open' ? 'Terbuka' : 'Selesai'];
-    })];
-    downloadCsv(`spm-kendala-produksi-${state.month}.csv`, rows);
+    const rows = state.data.production_events.filter((row) => row.event_date?.startsWith(state.month))
+      .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '') || String(a.id || '').localeCompare(String(b.id || '')));
+    const causeLabel = (value) => CAUSES.find(([key]) => key === value)?.[1] || value || '—';
+    const linked = rows.map((row) => ({ row, order: state.data.customer_orders.find((item) => item.id === row.customer_order_id) }));
+    const affected = rows.reduce((sum, row) => sum + Number(row.affected_qty || 0), 0);
+    const details = linked.map(({ row, order }) => [
+      csvDate(row.event_date), order?.customer || 'PO dihapus/tidak ditemukan', order?.po_number || '—', order?.item || '—',
+      causeLabel(row.cause_category), row.cause_detail || '—', csvQuantity(row.affected_qty), row.status === 'open' ? 'Terbuka' : 'Selesai',
+    ]);
+    downloadReport(`spm-kendala-produksi-${state.month}.csv`, 'Kendala dan penyebab produksi', period, [
+      ['Jumlah catatan kendala', csvQuantity(rows.length)], ['Kendala masih terbuka', csvQuantity(rows.filter((row) => row.status === 'open').length)],
+      ['Kendala selesai', csvQuantity(rows.filter((row) => row.status === 'resolved').length)], ['Total unit terdampak', csvQuantity(affected)],
+    ], ['Tanggal', 'Customer', 'No. PO', 'Barang', 'Kategori penyebab', 'Catatan', 'Unit terdampak', 'Status'], details,
+    ['TOTAL PERIODE', '', '', '', '', '', csvQuantity(affected), '']);
   } else if (kind === 'dashboard-invoices') {
-    const rows = [['Customer', 'No. invoice', 'No. PO', 'Tanggal invoice', 'Jatuh tempo', 'Nilai invoice', 'Outstanding', 'Status'], ...state.data.sales_invoices.filter((row) => Number(row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0)) > 0).map((row) => [row.customer, row.invoice_number, row.po_number, row.invoice_date, row.due_date, row.amount, row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0), row.due_date && row.due_date < isoToday() ? 'Jatuh tempo' : 'Belum dibayar'])];
-    downloadCsv('spm-outstanding-invoice.csv', rows);
+    const rows = state.data.sales_invoices.filter((row) => Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0)) > 0)
+      .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.due_date || '9999').localeCompare(b.due_date || '9999'));
+    const outstanding = (row) => Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0));
+    const overdue = rows.filter((row) => statusForInvoice(row)[0] === 'late');
+    const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const totalPaid = rows.reduce((sum, row) => sum + Number(row.paid_amount || 0), 0);
+    const totalOutstanding = rows.reduce((sum, row) => sum + outstanding(row), 0);
+    const details = rows.map((row) => [
+      row.customer || '—', row.invoice_number, row.po_number || '—', csvDate(row.invoice_date), csvDate(row.due_date),
+      csvMoney(row.amount), csvMoney(row.paid_amount), csvMoney(outstanding(row)), statusForInvoice(row)[1],
+    ]);
+    downloadReport('spm-outstanding-invoice-semua-periode.csv', 'Invoice customer yang belum lunas', 'Semua periode', [
+      ['Jumlah invoice outstanding', csvQuantity(rows.length)], ['Jumlah customer', csvQuantity(new Set(rows.map((row) => row.customer).filter(Boolean)).size)],
+      ['Nilai invoice (Rp)', csvMoney(totalAmount)], ['Pembayaran tercatat (Rp)', csvMoney(totalPaid)],
+      ['Total outstanding (Rp)', csvMoney(totalOutstanding)], ['Invoice terlambat', csvQuantity(overdue.length)],
+      ['Outstanding terlambat (Rp)', csvMoney(overdue.reduce((sum, row) => sum + outstanding(row), 0))],
+    ], ['Customer', 'No. invoice', 'No. PO', 'Tanggal invoice', 'Jatuh tempo', 'Nilai invoice (Rp)', 'Sudah dibayar (Rp)', 'Outstanding (Rp)', 'Status'], details,
+    ['TOTAL OUTSTANDING', '', '', '', '', csvMoney(totalAmount), csvMoney(totalPaid), csvMoney(totalOutstanding), '']);
   } else if (kind === 'pricelist') {
-    const rows = [['No', 'Fluting', 'Medium', 'Liner', ...priceSpecs], ...pricelist.map((row) => [row[0], ...row[1], ...row[2]])];
-    downloadCsv('spm-pricelist-karton.csv', rows);
+    const prices = pricelist.flatMap((row) => row[2].map(Number));
+    const minimum = Math.min(...prices); const maximum = Math.max(...prices);
+    const average = prices.reduce((sum, value) => sum + value, 0) / (prices.length || 1);
+    const details = pricelist.map((row) => [row[0], ...row[1], ...row[2].map((value) => csvNumericCell(value, 0, 0))]);
+    downloadReport('spm-pricelist-karton.csv', 'Daftar harga karton', 'Tidak berlaku', [
+      ['Jumlah komposisi material', csvQuantity(pricelist.length)], ['Varian harga per komposisi', csvQuantity(priceSpecs.length)],
+      ['Harga minimum (Rp)', csvNumericCell(minimum, 0, 0)], ['Harga maksimum (Rp)', csvNumericCell(maximum, 0, 0)],
+      ['Rata-rata harga (Rp)', csvNumericCell(average, 0, 0)],
+    ], ['No.', 'Fluting', 'Medium', 'Liner', ...priceSpecs.map((spec) => `${spec} (Rp)`)], details);
   }
 }
 
@@ -449,11 +612,23 @@ async function saveModal(form) {
     return saved;
   }
   if (action === 'save-invoice') {
-    const paidAmount = Math.min(num('paid_amount'), num('amount'));
+    const amount = num('amount');
+    const paidAmount = Math.min(num('paid_amount'), amount);
+    if (amount > 0 && paidAmount >= amount && !values.paid_date) {
+      throw new Error('Tanggal pelunasan wajib diisi untuk invoice yang sudah lunas.');
+    }
     return saveRow('sales_invoices', {
       invoice_date: values.invoice_date, due_date: values.due_date || null, paid_date: values.paid_date || null,
       customer: values.customer.trim(), invoice_number: values.invoice_number.trim(), po_number: values.po_number.trim(),
-      amount: num('amount'), paid_amount: paidAmount, outstanding_amount: null,
+      amount, paid_amount: paidAmount, outstanding_amount: null,
+    }, id);
+  }
+  if (action === 'mark-invoice-paid') {
+    const invoice = state.data.sales_invoices.find((row) => row.id === id);
+    if (!invoice) throw new Error('Invoice tidak ditemukan. Muat ulang halaman lalu coba lagi.');
+    if (!values.paid_date) throw new Error('Tanggal pelunasan wajib diisi.');
+    return saveRow('sales_invoices', {
+      paid_date: values.paid_date, paid_amount: Number(invoice.amount), outstanding_amount: 0,
     }, id);
   }
   if (action === 'save-customer-order') {
@@ -656,13 +831,16 @@ async function handleClick(event) {
     const invoice = state.data.sales_invoices.find((row) => row.id === button.dataset.id);
     if (!invoice) return;
     const isPaid = Number(invoice.outstanding_amount ?? Math.max(invoice.amount - (invoice.paid_amount || 0), 0)) <= 0;
+    if (!isPaid) {
+      invoicePaymentDateModal(invoice);
+      return;
+    }
     try {
       const updated = await saveRow('sales_invoices', {
-        paid_date: isPaid ? null : isoToday(), paid_amount: isPaid ? 0 : invoice.amount,
-        outstanding_amount: isPaid ? invoice.amount : 0,
+        paid_date: null, paid_amount: 0, outstanding_amount: invoice.amount,
       }, invoice.id);
       updateLocalRow('sales_invoices', updated); render();
-      toast(isPaid ? 'Invoice ditandai belum lunas.' : 'Invoice ditandai lunas.');
+      toast('Invoice ditandai belum lunas.');
     } catch (error) { toast(friendlyError(error), 'error'); }
     return;
   }
@@ -830,7 +1008,9 @@ async function handleSubmit(event) {
     state.inputLogsMonth = '';
     state.busy = false;
     render();
-    toast(action === 'confirm-delete' ? 'Data berhasil dihapus.' : form.dataset.id ? 'Data berhasil diperbarui.' : 'Data berhasil disimpan.', action === 'confirm-delete' ? 'success' : form.dataset.id ? 'info' : 'success');
+    const successMessage = action === 'confirm-delete' ? 'Data berhasil dihapus.' : action === 'mark-invoice-paid' ? 'Tanggal pelunasan invoice berhasil dicatat.' : form.dataset.id ? 'Data berhasil diperbarui.' : 'Data berhasil disimpan.';
+    const successType = action === 'confirm-delete' || action === 'mark-invoice-paid' ? 'success' : form.dataset.id ? 'info' : 'success';
+    toast(successMessage, successType);
   } catch (error) {
     state.busy = false;
     toast(friendlyError(error), 'error');
