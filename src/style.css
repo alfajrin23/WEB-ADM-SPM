@@ -214,7 +214,7 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
 .search-field { display: flex; align-items: center; gap: 8px; width: min(370px, 100%); min-height: 39px; padding: 0 11px; border: 1px solid #e5e1d8; border-radius: 12px; background: #fffefa; color: #89949b; }
 .search-field input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: .73rem; }
 .select-compact { min-height: 39px; padding: 0 28px 0 11px; border: 1px solid #e5e1d8; border-radius: 12px; background: #fffefa; color: #5b6c78; font-size: .73rem; }
-.table-wrap { width: 100%; overflow: auto; border: 1px solid #e8e4dc; border-radius: 14px; scrollbar-color: #c5cdd0 transparent; scrollbar-width: thin; }
+.table-wrap { width: 100%; overflow: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; border: 1px solid #e8e4dc; border-radius: 14px; scrollbar-color: #c5cdd0 transparent; scrollbar-width: thin; }
 table { width: 100%; min-width: 740px; border-collapse: separate; border-spacing: 0; }
 th, td { padding: 11px 12px; border-bottom: 1px solid #eeebe4; text-align: left; vertical-align: middle; }
 th { position: sticky; z-index: 1; top: 0; background: #eef0ed; color: #64737a; font-size: .64rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; }
@@ -227,6 +227,10 @@ tbody tr:hover { background: #faf8f1; }
 .debit { color: #af4a43; }
 .credit { color: #287857; }
 .row-actions { display: flex; align-items: center; gap: 2px; white-space: nowrap; }
+td.row-actions { position: sticky; right: 0; z-index: 2; background: #fffefa; box-shadow: -8px 0 12px rgba(38, 49, 52, .06); }
+th.actions-heading { position: sticky; right: 0; z-index: 3; background: #eef0ed; }
+tbody tr:hover td.row-actions { background: #faf8f1; }
+.row-actions .icon-button { width: 36px; height: 36px; }
 .total-row td { background: #f2efe6; color: #405362; font-weight: 800; }
 .tag { display: inline-flex; align-items: center; padding: 4px 8px; border: 1px solid #e3e5df; border-radius: 99px; background: #f6f6f0; color: #60717a; font-size: .65rem; font-weight: 700; white-space: nowrap; }
 .table-sub { display: block; margin-top: 4px; color: #8a969b; font-size: .64rem; }

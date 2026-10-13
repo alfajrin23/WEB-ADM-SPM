@@ -15,6 +15,24 @@ const emptyData = () => ({
   company_settings: [], cashflow_transactions: [], supplier_ledger_entries: [], sales_invoices: [],
   supplier_purchase_orders: [], customer_orders: [], production_events: [],
 });
+const tablesByTab = {
+  dashboard: ['company_settings', 'cashflow_transactions', 'sales_invoices', 'customer_orders', 'production_events'],
+  cashflow: ['company_settings', 'cashflow_transactions'],
+  piutang: ['supplier_ledger_entries'],
+  tagihan: ['sales_invoices'],
+  produksi: ['customer_orders', 'production_events'],
+  supplier: ['supplier_purchase_orders'],
+  kalkulator: [],
+  impor: [],
+  'logs-input': [],
+};
+const tableByAction = {
+  'save-cashflow': 'cashflow_transactions', 'save-opening': 'company_settings',
+  'save-supplier-entry': 'supplier_ledger_entries', 'save-invoice': 'sales_invoices',
+  'save-customer-order': 'customer_orders', 'save-production-event': 'production_events',
+  'save-po': 'supplier_purchase_orders', 'save-shipped': 'supplier_purchase_orders',
+  'save-quantities': 'customer_orders',
+};
 
 const state = {
   session: null,
@@ -28,8 +46,13 @@ const state = {
   loading: false,
   loadError: '',
   data: emptyData(),
+  loadedTables: new Set(),
+  tableLoadedAt: new Map(),
   inputLogs: [],
+  inputLogsMonth: '',
+  inputLogsLoadedAt: 0,
   profiles: [],
+  profilesLoaded: false,
   month: localISODate(new Date()).slice(0, 7),
   category: '',
   invoiceStatus: '',
@@ -49,6 +72,8 @@ const state = {
 
 const app = document.querySelector('#app');
 let authHydration = 0;
+let activeDataLoads = 0;
+let dataLoadGeneration = 0;
 
 function toast(message, type = 'success') {
   clearTimeout(state.toastTimer);
@@ -116,22 +141,82 @@ function renderModal() {
   return `<div class="modal-backdrop" data-act="backdrop"><section class="modal-card ${width}" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-modal-card><header class="modal-heading"><div><p class="eyebrow">CV SURYA PRATAMA MANDIRI</p><h2 id="modal-title">${esc(title)}</h2></div><button type="button" class="icon-button" aria-label="Tutup" data-act="close-modal">${icon('close', 18)}</button></header>${form}</section></div>`;
 }
 
-async function refreshData() {
-  state.loading = true;
+function updateLocalRow(table, row) {
+  if (!table || !row) return;
+  if (table === 'company_settings') {
+    state.data.company_settings = [row];
+  } else {
+    const rows = state.data[table] || [];
+    const index = rows.findIndex((item) => item.id === row.id);
+    state.data[table] = index < 0
+      ? [row, ...rows]
+      : rows.map((item, rowIndex) => rowIndex === index ? row : item);
+  }
+  state.loadedTables.add(table);
+  state.tableLoadedAt.set(table, Date.now());
+}
+
+function removeLocalRow(table, id) {
+  if (!table || !id || !state.data[table]) return;
+  state.data[table] = state.data[table].filter((row) => row.id !== id);
+  state.tableLoadedAt.set(table, Date.now());
+}
+
+async function refreshData({
+  tables = tablesByTab[state.tab] || [], forceTables = false,
+  includeAdmin = state.tab === 'logs-input', forceLogs = false, forceProfiles = false,
+  showLoading = true,
+} = {}) {
+  const tablesToLoad = [...new Set(tables)].filter((table) => forceTables
+    || !state.loadedTables.has(table)
+    || Date.now() - (state.tableLoadedAt.get(table) || 0) > 60_000);
+  const isDeveloper = state.profile?.role === 'developer' && includeAdmin;
+  const requestedLogMonth = state.month;
+  const shouldLoadLogs = isDeveloper && (forceLogs || state.inputLogsMonth !== requestedLogMonth || Date.now() - state.inputLogsLoadedAt > 60_000);
+  const shouldLoadProfiles = isDeveloper && (forceProfiles || !state.profilesLoaded);
+  if (!tablesToLoad.length && !shouldLoadLogs && !shouldLoadProfiles) {
+    if (showLoading) render();
+    return;
+  }
+
+  const userId = state.session?.user?.id;
+  const generation = dataLoadGeneration;
   state.loadError = '';
-  render();
+  if (showLoading) {
+    activeDataLoads += 1;
+    state.loading = true;
+    render();
+  }
   try {
-    state.data = { ...emptyData(), ...await loadWorkspace() };
-    if (state.profile?.role === 'developer') {
-      [state.inputLogs, state.profiles] = await Promise.all([loadInputLogs(), loadWorkspaceUsers()]);
-    } else {
-      state.inputLogs = [];
-      state.profiles = [];
+    const [workspace, logs, profiles] = await Promise.all([
+      tablesToLoad.length ? loadWorkspace(tablesToLoad) : Promise.resolve(null),
+      shouldLoadLogs ? loadInputLogs(requestedLogMonth) : Promise.resolve(null),
+      shouldLoadProfiles ? loadWorkspaceUsers() : Promise.resolve(null),
+    ]);
+    if (state.session?.user?.id !== userId) return;
+    if (workspace) {
+      state.data = { ...state.data, ...workspace };
+      tablesToLoad.forEach((table) => {
+        state.loadedTables.add(table);
+        state.tableLoadedAt.set(table, Date.now());
+      });
+    }
+    if (logs && state.month === requestedLogMonth) {
+      state.inputLogs = logs;
+      state.inputLogsMonth = requestedLogMonth;
+      state.inputLogsLoadedAt = Date.now();
+    }
+    if (profiles) {
+      state.profiles = profiles;
+      state.profilesLoaded = true;
     }
   } catch (error) {
-    state.loadError = friendlyError(error);
+    if (state.session?.user?.id === userId) state.loadError = friendlyError(error);
   } finally {
-    state.loading = false;
+    if (showLoading) {
+      if (generation === dataLoadGeneration) activeDataLoads = Math.max(0, activeDataLoads - 1);
+      state.loading = activeDataLoads > 0;
+    }
     render();
   }
 }
@@ -176,12 +261,12 @@ function invoiceModal(row = {}) {
   });
 }
 
-function supplierEntryModal(type, supplier = '') {
+function supplierEntryModal(type, supplier = '', row = {}) {
   const payment = type === 'payment';
   const normalizedSupplier = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
   const supplierBalance = payment
     ? state.data.supplier_ledger_entries
-      .filter((row) => normalizedSupplier(row.supplier) === normalizedSupplier(supplier))
+      .filter((entry) => normalizedSupplier(entry.supplier) === normalizedSupplier(supplier) && entry.id !== row.id)
       .reduce((total, row) => total + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0)
     : 0;
   if (payment && supplierBalance <= 0) {
@@ -192,10 +277,12 @@ function supplierEntryModal(type, supplier = '') {
     .sort((a, b) => a.localeCompare(b, 'id'));
   const supplierField = payment
     ? `<label class="field field-wide"><span>Nama supplier</span><input value="${esc(supplier)}" disabled><input type="hidden" name="supplier" value="${esc(supplier)}"></label>`
-    : `${inputField('Nama supplier', 'supplier', '', 'text', { required: true, placeholder: 'Nama supplier', attrs: 'list="supplier-ledger-vendors"' })}<datalist id="supplier-ledger-vendors">${supplierNames.map((name) => `<option value="${esc(name)}"></option>`).join('')}</datalist>`;
+    : `${inputField('Nama supplier', 'supplier', row.supplier || '', 'text', { required: true, placeholder: 'Nama supplier', attrs: 'list="supplier-ledger-vendors"' })}<datalist id="supplier-ledger-vendors">${supplierNames.map((name) => `<option value="${esc(name)}"></option>`).join('')}</datalist>`;
   openModal({
-    title: payment ? `Pembayaran supplier · ${supplier}` : 'Tagihan baru', action: 'save-supplier-entry', submit: payment ? 'Simpan pembayaran' : 'Simpan tagihan',
-    body: `<div class="form-grid">${supplierField}${inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', '', 'number', { required: true, min: 0.01, step: '0.01', attrs: payment ? `max="${supplierBalance}"` : '' })}${inputField('Keterangan (opsional)', 'description', '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${payment ? `<p class="form-hint">Sisa piutang supplier ini ${rupiah(supplierBalance)}. Pembayaran tidak boleh melebihi sisa tersebut.</p>` : ''}`,
+    title: row.id ? (payment ? 'Edit pembayaran supplier' : 'Edit tagihan supplier') : payment ? `Pembayaran supplier · ${supplier}` : 'Tagihan baru',
+    action: 'save-supplier-entry', submit: row.id ? 'Simpan perubahan' : payment ? 'Simpan pembayaran' : 'Simpan tagihan',
+    attrs: row.id ? `data-id="${esc(row.id)}"` : '',
+    body: `<div class="form-grid">${supplierField}${inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', row.entry_date || isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, step: '0.01', attrs: payment ? `max="${supplierBalance}"` : '' })}${inputField('Keterangan (opsional)', 'description', row.description || '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${payment ? `<p class="form-hint">Sisa piutang supplier ini ${rupiah(supplierBalance)}. Pembayaran tidak boleh melebihi sisa tersebut.</p>` : ''}`,
   });
 }
 
@@ -254,6 +341,7 @@ function editByTable(table, id) {
   const row = state.data[table]?.find((item) => item.id === id);
   if (!row) return;
   if (table === 'cashflow_transactions') cashflowModal(row);
+  if (table === 'supplier_ledger_entries') supplierEntryModal(row.entry_type, row.supplier, row);
   if (table === 'sales_invoices') invoiceModal(row);
   if (table === 'customer_orders') customerOrderModal(row);
   if (table === 'supplier_purchase_orders') supplierOrderModal(row);
@@ -312,12 +400,15 @@ async function saveModal(form) {
   }
   if (action === 'save-opening') {
     const userId = state.session.user.id;
-    const { error } = await supabase.from('company_settings').upsert({
+    const valuesToSave = {
       owner_id: userId, workspace_id: state.profile.workspace_id,
       opening_balance: num('opening_balance'), opening_balance_date: values.opening_balance_date,
+    };
+    const { error } = await supabase.from('company_settings').upsert({
+      ...valuesToSave,
     }, { onConflict: 'workspace_id' });
     if (error) throw error;
-    return;
+    return valuesToSave;
   }
   if (action === 'save-supplier-entry') {
     const supplier = String(values.supplier || '').trim().replace(/\s+/g, ' ');
@@ -328,7 +419,7 @@ async function saveModal(form) {
     if (values.entry_type === 'payment') {
       const key = supplier.toLocaleLowerCase('id-ID');
       const balance = state.data.supplier_ledger_entries
-        .filter((row) => String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === key)
+        .filter((row) => row.id !== id && String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === key)
         .reduce((total, row) => total + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0);
       if (amount > balance) throw new Error(`Nominal bayar melebihi sisa piutang ${rupiah(Math.max(balance, 0))}.`);
     }
@@ -337,8 +428,9 @@ async function saveModal(form) {
     const saved = await saveRow('supplier_ledger_entries', {
       supplier, entry_date: values.entry_date, entry_type: values.entry_type,
       amount, description: values.description.trim(),
-    });
+    }, id);
     state.expandedSuppliers.add(String(existingSupplier || supplier).trim().replace(/\s+/g, ' '));
+    state.expandedSuppliers.add(supplier);
     return saved;
   }
   if (action === 'save-invoice') {
@@ -392,7 +484,7 @@ async function saveModal(form) {
     if (!pending) throw new Error('Data yang akan dihapus tidak ditemukan.');
     await deleteRow(pending.table, pending.id);
     state.pendingDelete = null;
-    return;
+    return { deleted: true, table: pending.table, id: pending.id };
   }
   throw new Error('Form ini belum memiliki aksi penyimpanan.');
 }
@@ -400,6 +492,7 @@ async function saveModal(form) {
 async function runImport() {
   const preview = state.importPreview;
   if (!preview?.records.length) throw new Error('Tidak ada baris yang dapat diimpor.');
+  const tablesToRefresh = [preview.type];
   const conflict = preview.type === 'supplier_purchase_orders' ? 'workspace_id,po_number' : 'workspace_id,source_key';
   await upsertRows(preview.type, preview.records, conflict);
   if (preview.type === 'cashflow_transactions' && preview.openingBalance != null) {
@@ -409,11 +502,12 @@ async function runImport() {
       opening_balance_date: preview.openingBalanceDate || `${state.month}-01`,
     }, { onConflict: 'workspace_id' });
     if (error) throw error;
+    tablesToRefresh.push('company_settings');
   }
   toast(`${preview.records.length} baris berhasil diimpor.`, 'success');
   state.importPreview = null;
   state.importFile = null;
-  await refreshData();
+  await refreshData({ tables: tablesToRefresh, forceTables: true, showLoading: false });
 }
 
 function updatePoPreview(target) {
@@ -463,7 +557,9 @@ async function handleClick(event) {
   if (action === 'auth-mode') { state.authMode = button.dataset.mode; state.authMessage = ''; state.authMessageType = 'info'; render(); return; }
   if (action === 'navigate') {
     if (button.dataset.tab === 'logs-input' && state.profile?.role !== 'developer') return;
-    state.tab = button.dataset.tab; state.search = ''; state.modal = null; render(); return;
+    state.tab = button.dataset.tab; state.search = ''; state.modal = null;
+    void refreshData({ forceLogs: state.tab === 'logs-input', forceProfiles: state.tab === 'logs-input' });
+    return;
   }
   if (action === 'select-month') { state.month = button.dataset.month; render(); return; }
   if (action === 'change-year') {
@@ -484,7 +580,7 @@ async function handleClick(event) {
     openModal({ title: 'Atur saldo awal', action: 'save-opening', submit: 'Simpan saldo awal', body: `<div class="form-grid">${inputField('Nilai saldo awal', 'opening_balance', row.opening_balance || 0, 'number', { required: true, step: '0.01' })}${inputField('Saldo per tanggal', 'opening_balance_date', row.opening_balance_date || isoToday(), 'date', { required: true })}</div><p class="form-hint">Saldo berjalan dihitung dari transaksi pada dan setelah tanggal saldo awal.</p>` });
     return;
   }
-  if (action === 'open-import') { state.tab = 'impor'; render(); return; }
+  if (action === 'open-import') { state.tab = 'impor'; void refreshData(); return; }
   if (action === 'filter-category') { state.category = state.category === button.dataset.category ? '' : button.dataset.category; render(); return; }
   if (action === 'toggle-supplier') {
     const name = button.dataset.supplier;
@@ -498,18 +594,22 @@ async function handleClick(event) {
     if (!invoice) return;
     const isPaid = Number(invoice.outstanding_amount ?? Math.max(invoice.amount - (invoice.paid_amount || 0), 0)) <= 0;
     try {
-      await saveRow('sales_invoices', {
+      const updated = await saveRow('sales_invoices', {
         paid_date: isPaid ? null : isoToday(), paid_amount: isPaid ? 0 : invoice.amount,
         outstanding_amount: isPaid ? invoice.amount : 0,
       }, invoice.id);
-      await refreshData(); toast(isPaid ? 'Invoice ditandai belum lunas.' : 'Invoice ditandai lunas.');
+      updateLocalRow('sales_invoices', updated); render();
+      toast(isPaid ? 'Invoice ditandai belum lunas.' : 'Invoice ditandai lunas.');
     } catch (error) { toast(friendlyError(error), 'error'); }
     return;
   }
   if (action === 'toggle-event') {
     const row = state.data.production_events.find((item) => item.id === button.dataset.id);
     if (!row) return;
-    try { await saveRow('production_events', { status: row.status === 'open' ? 'resolved' : 'open' }, row.id); await refreshData(); toast('Status kendala diperbarui.', 'info'); }
+    try {
+      const updated = await saveRow('production_events', { status: row.status === 'open' ? 'resolved' : 'open' }, row.id);
+      updateLocalRow('production_events', updated); render(); toast('Status kendala diperbarui.', 'info');
+    }
     catch (error) { toast(friendlyError(error), 'error'); }
     return;
   }
@@ -551,7 +651,7 @@ async function handleClick(event) {
     state.calculatorTarget = null; state.tab = 'supplier'; supplierOrderModal(state.poDraft); return;
   }
   if (action === 'export') { exportData(button.dataset.kind); return; }
-  if (action === 'open-import') { state.tab = 'impor'; render(); return; }
+  if (action === 'open-import') { state.tab = 'impor'; void refreshData(); return; }
   if (action === 'refresh-import') { if (state.importFile) await readImportFile(state.importFile, state.importPreview?.sheetName); return; }
   if (action === 'confirm-import') {
     button.disabled = true;
@@ -592,7 +692,13 @@ function handleInput(event) {
 
 async function handleChange(event) {
   const target = event.target;
-  if (target.matches('[data-filter="month"]')) { state.month = target.value; render(); return; }
+  if (target.matches('[data-filter="month"]')) {
+    state.month = target.value;
+    if (state.tab === 'logs-input') {
+      void refreshData({ tables: [], includeAdmin: true, forceLogs: true, showLoading: false });
+    } else render();
+    return;
+  }
   if (target.matches('[data-filter="cashCategory"]')) { state.category = target.value; render(); return; }
   if (target.matches('[data-filter="invoiceStatus"]')) { state.invoiceStatus = target.value; render(); return; }
   if (target.matches('[data-import-file]')) { await readImportFile(target.files?.[0]); return; }
@@ -632,7 +738,10 @@ async function handleSubmit(event) {
     render();
     try {
       await setWorkspaceUserRole(values.user_id, values.role);
-      state.profiles = await loadWorkspaceUsers();
+      [state.profiles, state.inputLogs] = await Promise.all([loadWorkspaceUsers(), loadInputLogs(state.month)]);
+      state.profilesLoaded = true;
+      state.inputLogsMonth = state.month;
+      state.inputLogsLoadedAt = Date.now();
       toast('Akses akun berhasil diperbarui.');
     } catch (error) {
       toast(friendlyError(error), 'error');
@@ -643,10 +752,15 @@ async function handleSubmit(event) {
   state.busy = true;
   const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
   try {
-    await saveModal(form);
+    const result = await saveModal(form);
     const action = form.dataset.action;
+    if (result?.deleted) removeLocalRow(result.table, result.id);
+    else if (tableByAction[action] && result) updateLocalRow(tableByAction[action], result);
     state.modal = null;
-    await refreshData();
+    state.pendingDelete = null;
+    state.inputLogsMonth = '';
+    state.busy = false;
+    render();
     toast(action === 'confirm-delete' ? 'Data berhasil dihapus.' : form.dataset.id ? 'Data berhasil diperbarui.' : 'Data berhasil disimpan.', action === 'confirm-delete' ? 'success' : form.dataset.id ? 'info' : 'success');
   } catch (error) {
     state.busy = false;
@@ -659,8 +773,25 @@ app.addEventListener('click', handleClick);
 app.addEventListener('input', handleInput);
 app.addEventListener('change', handleChange);
 app.addEventListener('submit', handleSubmit);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.profile?.workspace_id) void refreshData({ showLoading: false });
+});
 
 async function activateSession(session) {
+  const previousUserId = state.session?.user?.id;
+  const nextUserId = session?.user?.id;
+  if (previousUserId !== nextUserId) {
+    dataLoadGeneration += 1;
+    activeDataLoads = 0;
+    state.loadedTables.clear();
+    state.tableLoadedAt.clear();
+    state.data = emptyData();
+    state.inputLogs = [];
+    state.inputLogsMonth = '';
+    state.inputLogsLoadedAt = 0;
+    state.profiles = [];
+    state.profilesLoaded = false;
+  }
   const requestId = ++authHydration;
   state.session = session;
   state.modal = null;
@@ -706,6 +837,10 @@ if (isConfigured) {
   let receivedAuthEvent = false;
   supabase.auth.onAuthStateChange((_event, session) => {
     receivedAuthEvent = true;
+    if (session && state.session?.user?.id === session.user.id && (state.profileLoading || state.profile)) {
+      state.session = session;
+      return;
+    }
     void activateSession(session);
   });
   supabase.auth.getSession().then(({ data, error }) => {

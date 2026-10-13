@@ -8,6 +8,16 @@ export const supabase = isConfigured ? createClient(url, anonKey) : null;
 
 let activeWorkspaceId = null;
 
+const workspaceColumns = {
+  company_settings: 'opening_balance, opening_balance_date',
+  cashflow_transactions: 'id, transaction_date, category, requester, description, amount, kind',
+  supplier_ledger_entries: 'id, supplier, entry_date, entry_type, amount, description, created_at',
+  sales_invoices: 'id, invoice_date, due_date, paid_date, customer, invoice_number, po_number, amount, paid_amount, outstanding_amount',
+  supplier_purchase_orders: 'id, po_number, supplier, customer, order_date, items',
+  customer_orders: 'id, order_date, due_date, po_number, customer, item, size, qty_order, qty_produced, qty_delivered, unit_price, amount',
+  production_events: 'id, customer_order_id, event_date, cause_category, cause_detail, affected_qty, status',
+};
+
 export function setWorkspaceId(workspaceId) {
   activeWorkspaceId = workspaceId || null;
 }
@@ -22,23 +32,28 @@ export async function loadProfile(userId) {
   return data;
 }
 
-export async function loadWorkspace() {
-  const tables = [
-    'company_settings', 'cashflow_transactions', 'supplier_ledger_entries',
-    'sales_invoices', 'supplier_purchase_orders', 'customer_orders', 'production_events',
-  ];
-  const results = await Promise.all(tables.map((table) => supabase.from(table).select('*')));
+export async function loadWorkspace(tables = Object.keys(workspaceColumns)) {
+  const requestedTables = [...new Set(tables)].filter((table) => workspaceColumns[table]);
+  if (!requestedTables.length) return {};
+  const results = await Promise.all(requestedTables.map((table) => supabase.from(table).select(workspaceColumns[table])));
   const error = results.find((result) => result.error)?.error;
   if (error) throw error;
-  return Object.fromEntries(tables.map((table, index) => [table, results[index].data || []]));
+  return Object.fromEntries(requestedTables.map((table, index) => [table, results[index].data || []]));
 }
 
-export async function loadInputLogs() {
-  const { data, error } = await supabase
+export async function loadInputLogs(month) {
+  let query = supabase
     .from('input_logs')
     .select('id, actor_email, table_name, record_id, action, changes, created_at')
     .order('created_at', { ascending: false })
-    .limit(500);
+    .limit(200);
+  if (month) {
+    const [year, monthNumber] = month.split('-').map(Number);
+    query = query
+      .gte('created_at', new Date(Date.UTC(year, monthNumber - 1, 1)).toISOString())
+      .lt('created_at', new Date(Date.UTC(year, monthNumber, 1)).toISOString());
+  }
+  const { data, error } = await query;
   if (error) throw error;
   return data || [];
 }
