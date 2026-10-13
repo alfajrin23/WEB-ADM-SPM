@@ -219,7 +219,7 @@ function payables(data, state) {
 }
 
 function invoices(data, state) {
-  const rows = data.sales_invoices.filter((row) => inMonth(row.invoice_date, state.month) && (!state.invoiceStatus || statusForInvoice(row)[0] === state.invoiceStatus) && (!state.search || `${row.customer} ${row.invoice_number} ${row.po_number}`.toLowerCase().includes(state.search.toLowerCase()))).sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'));
+  const rows = data.sales_invoices.filter((row) => (!state.invoiceStatus || statusForInvoice(row)[0] === state.invoiceStatus) && (!state.search || `${row.customer} ${row.invoice_number} ${row.po_number}`.toLowerCase().includes(state.search.toLowerCase()))).sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'));
   const balance = rows.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0)), 0);
   const table = rows.map((row) => {
     const [key, label] = statusForInvoice(row);
@@ -229,7 +229,7 @@ function invoices(data, state) {
   return `${pageHead('KEUANGAN', 'Tagihan customer', 'Pantau tanggal jatuh tempo dan pembayaran invoice tanpa mencampur nilai tagihan dengan kas masuk.', actionButton('Invoice baru', 'new-invoice', '', 'plus'))}
     <div class="summary-grid">${statStrip('Nilai invoice', money(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)))}${statStrip('Outstanding', money(balance))}${statStrip('Terlambat', integer(rows.filter((row) => statusForInvoice(row)[0] === 'late').length))}${statStrip('Invoice', integer(rows.length))}</div>
     <section class="panel"><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari invoice" data-filter="search" value="${esc(state.search)}" placeholder="Cari customer, PO, atau invoice"></label><select class="select-compact" data-filter="invoiceStatus"><option value="">Semua status</option><option value="open" ${state.invoiceStatus === 'open' ? 'selected' : ''}>Belum dibayar</option><option value="late" ${state.invoiceStatus === 'late' ? 'selected' : ''}>Jatuh tempo</option><option value="partial" ${state.invoiceStatus === 'partial' ? 'selected' : ''}>Sebagian dibayar</option><option value="paid" ${state.invoiceStatus === 'paid' ? 'selected' : ''}>Lunas</option></select>${actionButton('Export CSV', 'export', 'data-kind="invoices"', 'download', 'secondary')}</div>
-      ${rows.length ? tableWrap(`<table><thead><tr><th>Tanggal invoice</th><th>Jatuh tempo</th><th>Customer</th><th>No. invoice</th><th>No. PO</th><th>Nilai</th><th>Sisa</th><th>Status</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${table}</tbody></table>`) : emptyState('Belum ada invoice di periode ini', 'Tambahkan tagihan customer atau impor workbook OS CARTON BOX.', 'new-invoice', 'Tambah invoice', 'file')}
+      ${rows.length ? tableWrap(`<table><thead><tr><th>Tanggal invoice</th><th>Jatuh tempo</th><th>Customer</th><th>No. invoice</th><th>No. PO</th><th>Nilai</th><th>Sisa</th><th>Status</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${table}</tbody></table>`) : emptyState('Belum ada invoice', 'Tambahkan tagihan customer atau impor workbook OS CARTON BOX.', 'new-invoice', 'Tambah invoice', 'file')}
     </section>`;
 }
 
