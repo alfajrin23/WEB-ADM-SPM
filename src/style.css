@@ -58,6 +58,8 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
 .brand span { display: grid; gap: 3px; }
 .brand strong { font: 800 .89rem/1.2 Manrope, sans-serif; letter-spacing: -.025em; }
 .brand small { color: var(--muted); font-size: .7rem; letter-spacing: .07em; text-transform: uppercase; }
+.copyright-link { flex: 0 0 auto; color: var(--muted); font-size: .62rem; font-weight: 600; line-height: 1.4; text-decoration: none; }
+.copyright-link:hover { color: var(--navy); text-decoration: underline; text-underline-offset: 3px; }
 .main-nav { display: flex; flex: 1; align-items: center; justify-content: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .main-nav::-webkit-scrollbar { display: none; }
 .nav-tab {
@@ -382,6 +384,8 @@ tbody tr:hover td.row-actions { background: #faf8f1; }
 @media (max-width: 900px) {
   .topbar { flex-wrap: wrap; min-height: 73px; }
   .brand { flex: 1 1 auto; }
+  .copyright-link { order: 2; }
+  .account-menu { order: 2; }
   .account-menu { margin-left: auto; }
   .main-nav { order: 3; flex: 1 0 100%; justify-content: flex-start; }
   .nav-tab { min-height: 38px; }
@@ -398,10 +402,11 @@ tbody tr:hover td.row-actions { background: #faf8f1; }
 @media (max-width: 600px) {
   body { font-size: 13px; }
   .topbar { min-height: 64px; gap: 8px; padding: 7px 12px 3px; }
-  .brand { gap: 6px; }
+  .brand { flex: 1 1 100%; gap: 6px; }
   .brand img { width: 42px; height: 37px; }
   .brand strong { font-size: .74rem; }
   .brand small { font-size: .59rem; }
+  .copyright-link { flex: 1 1 130px; font-size: .57rem; }
   .account-menu { gap: 5px; padding-left: 8px; }
   .account-email { max-width: 84px; font-size: .64rem; }
   .main-nav { position: fixed; z-index: 35; right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); left: 8px; display: flex; justify-content: flex-start; gap: 2px; min-height: 60px; padding: 6px; border: 1px solid rgba(220, 217, 207, .95); border-radius: 18px; background: rgba(255, 254, 250, .94); box-shadow: 0 12px 40px rgba(30, 43, 50, .16); backdrop-filter: blur(18px); }

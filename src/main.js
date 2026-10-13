@@ -121,6 +121,7 @@ function render() {
   const tabs = visibleTabs.map(([key, label, glyph]) => `<button class="nav-tab ${state.tab === key ? 'active' : ''}" type="button" data-act="navigate" data-tab="${key}">${icon(glyph, 17)}<span>${esc(label)}</span></button>`).join('');
   app.innerHTML = `<div class="app-shell">
     <header class="topbar"><a class="brand" href="#" data-act="navigate" data-tab="dashboard"><img src="/brand-logo.png" alt="Logo CV Surya Pratama Mandiri"/><span><strong>CV Surya Pratama Mandiri</strong><small>${state.profile.role === 'developer' ? 'Developer' : 'Staff'} · Ruang kerja operasional</small></span></a>
+      <a class="copyright-link" href="https://github.com/alfajrin23" target="_blank" rel="noopener noreferrer">Copyright 2026 by Al Fajrin A Alamsyah</a>
       <nav class="main-nav" aria-label="Menu utama">${tabs}</nav>
       <div class="account-menu"><span class="account-dot"></span><span class="account-email">${esc(displayName)}</span><button type="button" class="icon-button" aria-label="Keluar" title="Keluar" data-act="signout">${icon('logout', 17)}</button></div>
     </header>
