@@ -4,7 +4,7 @@ import {
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
 import {
-  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, icon, isoToday, localISODate,
+  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, formatNumberInput, icon, isoToday, localISODate,
   orderProgress, rupiah, toNumber,
 } from './helpers.js';
 import { pageTabs, renderPage, renderSignIn } from './views.js';
@@ -226,12 +226,16 @@ function inputField(label, name, value = '', type = 'text', options = {}) {
   const attrs = options.attrs || '';
   const placeholder = options.placeholder ? `placeholder="${esc(options.placeholder)}"` : '';
   const required = options.required ? 'required' : '';
-  const min = options.min !== undefined ? `min="${options.min}"` : '';
-  const step = options.step ? `step="${options.step}"` : '';
+  const min = options.min !== undefined ? `${options.money ? 'data-min' : 'min'}="${options.min}"` : '';
+  const max = options.max !== undefined ? `data-max="${options.max}"` : '';
+  const step = options.step ? `${options.money ? 'data-step' : 'step'}="${options.step}"` : '';
+  const inputType = options.money ? 'text' : type;
+  const inputMode = options.money ? 'inputmode="decimal" data-money-input autocomplete="off"' : '';
+  const inputValue = options.money ? formatNumberInput(value) : value;
   const full = options.full ? 'field-wide' : '';
   const hint = options.hint ? `<small>${esc(options.hint)}</small>` : '';
   if (type === 'textarea') return `<label class="field ${full}"><span>${esc(label)}</span><textarea name="${esc(name)}" ${required} ${placeholder} ${attrs}>${esc(value)}</textarea>${hint}</label>`;
-  return `<label class="field ${full}"><span>${esc(label)}</span><input name="${esc(name)}" type="${type}" value="${esc(value)}" ${required} ${min} ${step} ${placeholder} ${attrs}>${hint}</label>`;
+  return `<label class="field ${full}"><span>${esc(label)}</span><input name="${esc(name)}" type="${inputType}" value="${esc(inputValue)}" ${required} ${min} ${max} ${step} ${inputMode} ${placeholder} ${attrs}>${hint}</label>`;
 }
 
 function selectField(label, name, choices, selected, options = {}) {
@@ -250,7 +254,7 @@ function cashflowModal(row = {}) {
   openModal({
     title: row.id ? 'Edit transaksi kas' : 'Transaksi kas baru', action: 'save-cashflow', submit: row.id ? 'Simpan perubahan' : 'Simpan transaksi',
     attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true })}${inputField('Nama pengajuan', 'requester', row.requester || '', 'text', { placeholder: 'Nama pemohon' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk menambah saldo. Kategori lain dicatat sebagai debit.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true })}${inputField('Nama pengajuan', 'requester', row.requester || '', 'text', { placeholder: 'Nama pemohon' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01', money: true })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk menambah saldo. Kategori lain dicatat sebagai debit.</p>`,
   });
 }
 
@@ -258,7 +262,7 @@ function invoiceModal(row = {}) {
   openModal({
     title: row.id ? 'Edit invoice customer' : 'Invoice baru', action: 'save-invoice', submit: row.id ? 'Simpan perubahan' : 'Simpan invoice',
     attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal invoice', 'invoice_date', row.invoice_date || isoToday(), 'date', { required: true })}${inputField('Jatuh tempo', 'due_date', row.due_date || '', 'date')}${inputField('Nama customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nomor invoice', 'invoice_number', row.invoice_number || '', 'text', { required: true })}${inputField('Nomor PO', 'po_number', row.po_number || '')}${inputField('Nilai invoice', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Sudah dibayar', 'paid_amount', row.paid_amount || 0, 'number', { min: 0, step: '0.01' })}${inputField('Tanggal pembayaran terakhir', 'paid_date', row.paid_date || '', 'date')}</div><p class="form-hint">Status dihitung dari sisa tagihan dan tanggal jatuh tempo.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal invoice', 'invoice_date', row.invoice_date || isoToday(), 'date', { required: true })}${inputField('Jatuh tempo', 'due_date', row.due_date || '', 'date')}${inputField('Nama customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nomor invoice', 'invoice_number', row.invoice_number || '', 'text', { required: true })}${inputField('Nomor PO', 'po_number', row.po_number || '')}${inputField('Nilai invoice', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01', money: true })}${inputField('Sudah dibayar', 'paid_amount', row.paid_amount || 0, 'number', { min: 0, step: '0.01', money: true })}${inputField('Tanggal pembayaran terakhir', 'paid_date', row.paid_date || '', 'date')}</div><p class="form-hint">Status dihitung dari sisa tagihan dan tanggal jatuh tempo.</p>`,
   });
 }
 
@@ -283,14 +287,14 @@ function supplierEntryModal(type, supplier = '', row = {}) {
     title: row.id ? (payment ? 'Edit pembayaran supplier' : 'Edit tagihan supplier') : payment ? `Pembayaran supplier · ${supplier}` : 'Tagihan baru',
     action: 'save-supplier-entry', submit: row.id ? 'Simpan perubahan' : payment ? 'Simpan pembayaran' : 'Simpan tagihan',
     attrs: row.id ? `data-id="${esc(row.id)}"` : '',
-    body: `<div class="form-grid">${supplierField}${inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', row.entry_date || isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, step: '0.01', attrs: payment ? `max="${supplierBalance}"` : '' })}${inputField('Keterangan (opsional)', 'description', row.description || '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${payment ? `<p class="form-hint">Sisa piutang supplier ini ${rupiah(supplierBalance)}. Pembayaran tidak boleh melebihi sisa tersebut.</p>` : ''}`,
+    body: `<div class="form-grid">${supplierField}${inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', row.entry_date || isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, max: payment ? supplierBalance : undefined, step: '0.01', money: true })}${inputField('Keterangan (opsional)', 'description', row.description || '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${payment ? `<p class="form-hint">Sisa piutang supplier ini ${rupiah(supplierBalance)}. Pembayaran tidak boleh melebihi sisa tersebut.</p>` : ''}`,
   });
 }
 
 function customerOrderModal(row = {}) {
   openModal({
     title: row.id ? 'Edit PO customer' : 'PO customer baru', action: 'save-customer-order', submit: row.id ? 'Simpan perubahan' : 'Simpan PO', attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date')}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Diperlukan untuk menilai keterlambatan.' })}${inputField('Nomor PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nama barang', 'item', row.item || '', 'text', { required: true })}${inputField('Ukuran / spesifikasi', 'size', row.size || '')}${inputField('Qty dipesan', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Qty diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Qty terkirim', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}${inputField('Harga per unit', 'unit_price', row.unit_price || 0, 'number', { min: 0, step: '0.01' })}${inputField('Nilai pesanan', 'amount', row.amount || 0, 'number', { min: 0, step: '0.01' })}</div><p class="form-hint">Qty produksi dan qty terkirim berbeda. Data DELIVERY dari workbook masuk sebagai qty terkirim; jumlah produksi dapat diisi saat dicatat.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date')}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Diperlukan untuk menilai keterlambatan.' })}${inputField('Nomor PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nama barang', 'item', row.item || '', 'text', { required: true })}${inputField('Ukuran / spesifikasi', 'size', row.size || '')}${inputField('Qty dipesan', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Qty diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Qty terkirim', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}${inputField('Harga per unit', 'unit_price', row.unit_price || 0, 'number', { min: 0, step: '0.01', money: true })}${inputField('Nilai pesanan', 'amount', row.amount || 0, 'number', { min: 0, step: '0.01', money: true })}</div><p class="form-hint">Qty produksi dan qty terkirim berbeda. Data DELIVERY dari workbook masuk sebagai qty terkirim; jumlah produksi dapat diisi saat dicatat.</p>`,
   });
 }
 
@@ -322,10 +326,10 @@ function supplierPoForm(draft) {
 function supplierPoItem(item, index) {
   const calc = {
     kurang: Math.max(Number(item.qtyOrder || 0) - Number(item.qtyKirim || 0), 0),
-    actual: Number(item.qtyKirim || 0) * Number(item.harga || 0),
+    actual: toNumber(item.qtyKirim) * toNumber(item.harga),
   };
   return `<section class="po-item-row" data-po-item><div class="po-item-top"><strong>Item ${index + 1}</strong><button type="button" class="icon-button danger-icon" aria-label="Hapus item" title="Hapus item" data-act="remove-po-item">${icon('trash', 15)}</button></div>
-    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty kirim</span><input name="item-shipped" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyKirim || 0)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc type="number" min="0" step="0.01" value="${esc(item.harga)}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
+    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty kirim</span><input name="item-shipped" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyKirim || 0)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc data-money-input data-min="0" data-step="0.01" inputmode="decimal" autocomplete="off" type="text" value="${esc(formatNumberInput(item.harga))}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
     <div class="po-item-calc"><span>Kurang kirim <b data-calc-short>${new Intl.NumberFormat('id-ID').format(calc.kurang)}</b></span><span>Nilai terkirim <b data-calc-value>${rupiah(calc.actual)}</b></span></div></section>`;
 }
 
@@ -523,6 +527,54 @@ function updatePoPreview(target) {
   if (actual) actual.textContent = rupiah(shipped * price);
 }
 
+function formatMoneyInput(target) {
+  const previousValue = target.value;
+  const previousCaret = target.selectionStart ?? previousValue.length;
+  const sourceBeforeCaret = previousValue.slice(0, previousCaret);
+  const raw = previousValue.replace(/[^\d,]/g, '');
+  const decimalIndex = raw.indexOf(',');
+  const integerPart = (decimalIndex < 0 ? raw : raw.slice(0, decimalIndex)).replace(/\D/g, '');
+  const decimalPart = decimalIndex < 0 ? '' : raw.slice(decimalIndex + 1).replace(/\D/g, '');
+  const groupedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const formatted = `${groupedInteger}${decimalIndex < 0 ? '' : `,${decimalPart}`}`;
+  if (formatted !== previousValue) {
+    const tokensBeforeCaret = (sourceBeforeCaret.match(/[\d,]/g) || []).length;
+    let nextCaret = 0;
+    let seenTokens = 0;
+    while (nextCaret < formatted.length && seenTokens < tokensBeforeCaret) {
+      if (/[\d,]/.test(formatted[nextCaret])) seenTokens += 1;
+      nextCaret += 1;
+    }
+    target.value = formatted;
+    target.setSelectionRange(nextCaret, nextCaret);
+  }
+}
+
+function validateMoneyInputs(form) {
+  for (const input of form.querySelectorAll('[data-money-input]')) {
+    const value = input.value.trim();
+    let message = '';
+    if (input.required && !value) message = 'Nominal wajib diisi.';
+    else if (value && !/\d/.test(value)) message = 'Masukkan nominal yang valid.';
+    else if (value) {
+      const amount = toNumber(value);
+      const min = input.dataset.min === undefined ? null : Number(input.dataset.min);
+      const max = input.dataset.max === undefined ? null : Number(input.dataset.max);
+      const decimalCount = value.match(/,(\d*)$/)?.[1].length || 0;
+      if (min !== null && amount < min) message = `Nominal minimal ${formatNumberInput(min)}.`;
+      else if (max !== null && amount > max) message = `Nominal maksimal ${formatNumberInput(max)}.`;
+      else if (input.dataset.step === '0.01' && decimalCount > 2) message = 'Maksimal dua angka di belakang koma.';
+    }
+    if (message) {
+      input.setCustomValidity(message);
+      input.reportValidity();
+      input.setCustomValidity('');
+      return false;
+    }
+  }
+  return true;
+}
+
 function preservePoDraft() {
   const form = document.querySelector('.modal-form[data-action="save-po"]');
   if (!form) return;
@@ -679,6 +731,11 @@ async function readImportFile(file, sheetName) {
 function handleInput(event) {
   const target = event.target;
   if (target.matches('[data-filter="search"]')) { setSearch(target); return; }
+  if (target.matches('[data-money-input]')) {
+    formatMoneyInput(target);
+    if (target.matches('[data-po-calc]')) updatePoPreview(target);
+    return;
+  }
   if (target.matches('[data-calc]')) {
     const key = target.dataset.calc;
     const position = target.type === 'text' ? target.selectionStart : null;
@@ -750,6 +807,7 @@ async function handleSubmit(event) {
     return;
   }
   if (form.dataset.form !== 'modal') return;
+  if (!validateMoneyInputs(form)) return;
   state.busy = true;
   const submit = form.querySelector('[type="submit"]'); if (submit) submit.disabled = true;
   try {

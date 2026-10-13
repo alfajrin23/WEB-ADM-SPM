@@ -54,6 +54,10 @@ export const rupiah = (value) => new Intl.NumberFormat('id-ID', {
 }).format(Number(value) || 0);
 
 export const integer = (value) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(Number(value) || 0);
+export function formatNumberInput(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  return new Intl.NumberFormat('id-ID', { maximumFractionDigits: 2 }).format(toNumber(value));
+}
 export const isoToday = () => localISODate(new Date());
 
 export function localISODate(value) {
