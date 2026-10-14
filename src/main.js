@@ -4,7 +4,7 @@ import {
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
 import {
-  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, isoToday, localISODate,
+  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, isoToday, localISODate,
   monthName, orderProgress, rupiah, statusForInvoice, toNumber,
 } from './helpers.js';
 import { pageTabs, renderPage, renderSignIn } from './views.js';
@@ -20,6 +20,7 @@ const tablesByTab = {
   cashflow: ['company_settings', 'cashflow_transactions'],
   piutang: ['supplier_ledger_entries'],
   tagihan: ['sales_invoices'],
+  'po-customer': ['customer_orders'],
   produksi: ['customer_orders', 'production_events'],
   supplier: ['supplier_purchase_orders'],
   kalkulator: [],
@@ -310,9 +311,24 @@ function supplierEntryModal(type, supplier = '', row = {}) {
 }
 
 function customerOrderModal(row = {}) {
+  const amount = Number(row.qty_order || 0) * Number(row.unit_price || 0);
+  const tax = Number(row.po_tax_amount || 0);
   openModal({
     title: row.id ? 'Edit PO customer' : 'PO customer baru', action: 'save-customer-order', submit: row.id ? 'Simpan perubahan' : 'Simpan PO', attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date')}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Diperlukan untuk menilai keterlambatan.' })}${inputField('Nomor PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('Nama barang', 'item', row.item || '', 'text', { required: true })}${inputField('Ukuran / spesifikasi', 'size', row.size || '')}${inputField('Qty dipesan', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01' })}${inputField('Qty diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Qty terkirim', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}${inputField('Harga per unit', 'unit_price', row.unit_price || 0, 'number', { min: 0, step: '0.01', money: true })}${inputField('Nilai pesanan', 'amount', row.amount || 0, 'number', { min: 0, step: '0.01', money: true })}</div><p class="form-hint">Qty produksi dan qty terkirim berbeda. Data DELIVERY dari workbook masuk sebagai qty terkirim; jumlah produksi dapat diisi saat dicatat.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date', { required: true })}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Opsional; dipakai untuk menilai PO yang terlambat.' })}${inputField('No PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('SPM/SKG', 'spm_skg', row.spm_skg || 'SPM', 'text', { required: true, placeholder: 'SPM atau SKG' })}${inputField('QTY PO', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01', attrs: 'data-customer-order-calc' })}${inputField('PRICE', 'unit_price', row.unit_price ?? '', 'number', { required: true, min: 0, step: '0.01', money: true, attrs: 'data-customer-order-calc' })}${inputField('PPN PO', 'po_tax_amount', row.po_tax_amount ?? 0, 'number', { min: 0, step: '0.01', money: true, attrs: 'data-customer-order-calc' })}${inputField('SIZE', 'size', row.size || '')}${inputField('ITEM', 'item', row.item || '', 'text', { required: true })}</div><div class="order-total-preview"><div><span>Total Harga</span><strong data-customer-order-preview="amount">${rupiah(amount)}</strong><small>QTY PO × PRICE</small></div><div><span>PPN</span><strong data-customer-order-preview="tax">${rupiah(tax)}</strong><small>Nilai PPN yang dicatat pada PO</small></div><div><span>Total Price</span><strong data-customer-order-preview="total">${rupiah(amount + tax)}</strong><small>Total Harga + PPN</small></div></div><p class="form-hint">Delivery dan spesifikasi proses dicatat pada halaman Produksi. Kekurangan kirim serta nilai jual dihitung dari data PO dan realisasi.</p>`,
+  });
+}
+
+function updateCustomerOrderPreview(target) {
+  const form = target.closest('form');
+  if (!form) return;
+  const read = (name) => toNumber(form.elements.namedItem(name)?.value);
+  const amount = read('qty_order') * read('unit_price');
+  const tax = read('po_tax_amount');
+  const values = { amount, tax, total: amount + tax };
+  Object.entries(values).forEach(([key, value]) => {
+    const output = form.querySelector(`[data-customer-order-preview="${key}"]`);
+    if (output) output.textContent = rupiah(value);
   });
 }
 
@@ -445,23 +461,42 @@ function exportData(kind) {
   } else if (kind === 'production') {
     const rows = state.data.customer_orders.filter((row) => row.order_date?.startsWith(state.month))
       .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
-    const totals = rows.reduce((sum, row) => ({
-      ordered: sum.ordered + Number(row.qty_order || 0), produced: sum.produced + Number(row.qty_produced || 0),
-      delivered: sum.delivered + Number(row.qty_delivered || 0),
-      shortage: sum.shortage + Math.max(Number(row.qty_order || 0) - Number(row.qty_delivered || 0), 0),
-    }), { ordered: 0, produced: 0, delivered: 0, shortage: 0 });
-    const details = rows.map((row) => [
-      csvDate(row.order_date), csvDate(row.due_date), row.po_number || '—', row.customer || '—', row.item || '—', row.size || '—',
-      csvQuantity(row.qty_order), csvQuantity(row.qty_produced), csvQuantity(row.qty_delivered),
-      csvQuantity(Math.max(Number(row.qty_order || 0) - Number(row.qty_delivered || 0), 0)), orderProgress(row)[1],
-    ]);
+    const totals = rows.reduce((sum, row) => {
+      const values = customerOrderFinancials(row);
+      sum.ordered += values.qtyOrder;
+      sum.produced += Number(row.qty_produced || 0);
+      sum.delivered += values.qtyDelivered;
+      sum.qtyDelta += values.qtyDelta;
+      sum.shortage += Math.max(-values.qtyDelta, 0);
+      sum.amount += values.amount;
+      sum.tax += values.tax;
+      sum.totalPrice += values.totalPrice;
+      sum.realizedAmount += values.realizedAmount;
+      sum.realizedTax += values.realizedTax;
+      sum.realizedTotal += values.realizedTotal;
+      sum.salesShortfall += values.salesShortfall;
+      return sum;
+    }, { ordered: 0, produced: 0, delivered: 0, qtyDelta: 0, shortage: 0, amount: 0, tax: 0, totalPrice: 0, realizedAmount: 0, realizedTax: 0, realizedTotal: 0, salesShortfall: 0 });
+    const details = rows.map((row) => {
+      const values = customerOrderFinancials(row);
+      return [
+        csvDate(row.order_date), csvDate(row.due_date), row.po_number || '—', row.customer || '—', row.spm_skg || '—', row.item || '—', row.size || '—',
+        csvQuantity(values.qtyOrder), csvQuantity(row.qty_produced), csvQuantity(values.qtyDelivered), csvQuantity(values.qtyDelta),
+        csvMoney(values.unitPrice), csvMoney(values.amount), csvMoney(values.tax), csvMoney(values.totalPrice),
+        csvMoney(values.realizedAmount), csvMoney(values.realizedTax), csvMoney(values.realizedTotal), csvMoney(values.salesShortfall),
+        row.size_sheet || '—', row.floot || '—', row.score || '—', row.height || '—', row.score_secondary || '—', orderProgress(row)[1],
+      ];
+    });
     downloadReport(`spm-produksi-${state.month}.csv`, 'Performa produksi dan pesanan customer', period, [
       ['Jumlah baris pesanan', csvQuantity(rows.length)], ['Jumlah PO unik', csvQuantity(new Set(rows.map((row) => row.po_number).filter(Boolean)).size)],
       ['Total qty dipesan', csvQuantity(totals.ordered)], ['Total qty diproduksi', csvQuantity(totals.produced)],
       ['Total qty terkirim', csvQuantity(totals.delivered)], ['Total kekurangan kirim', csvQuantity(totals.shortage)],
+      ['Total harga PO sebelum PPN (Rp)', csvMoney(totals.amount)], ['PPN PO (Rp)', csvMoney(totals.tax)], ['Total price PO (Rp)', csvMoney(totals.totalPrice)],
+      ['Jumlah jual (Rp)', csvMoney(totals.realizedAmount)], ['PPN jual (Rp)', csvMoney(totals.realizedTax)],
+      ['Jumlah jual termasuk PPN (Rp)', csvMoney(totals.realizedTotal)], ['Kurang jual (Rp)', csvMoney(totals.salesShortfall)],
       ['Pesanan lewat janji', csvQuantity(rows.filter((row) => orderProgress(row)[0] === 'late').length)],
-    ], ['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'Barang', 'Spesifikasi', 'Qty dipesan', 'Qty diproduksi', 'Qty terkirim', 'Kurang kirim', 'Status pesanan'], details,
-    ['TOTAL PERIODE', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.produced), csvQuantity(totals.delivered), csvQuantity(totals.shortage), '']);
+    ], ['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'SPM/SKG', 'Item', 'Size', 'QTY PO', 'Qty diproduksi', 'Delivery', 'Close/Kurang kirim', 'Price (Rp)', 'Total harga (Rp)', 'PPN PO (Rp)', 'Total price PO (Rp)', 'Jumlah jual (Rp)', 'PPN jual (Rp)', 'Jumlah jual+PPN (Rp)', 'Kurang jual (Rp)', 'Size Sheet', 'Floot', 'Scoor', 'Tinggi', 'Scoor 2', 'Status pesanan'], details,
+    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.produced), csvQuantity(totals.delivered), csvQuantity(totals.qtyDelta), '', csvMoney(totals.amount), csvMoney(totals.tax), csvMoney(totals.totalPrice), csvMoney(totals.realizedAmount), csvMoney(totals.realizedTax), csvMoney(totals.realizedTotal), csvMoney(totals.salesShortfall), '', '', '', '', '', '']);
   } else if (kind === 'supplier-po') {
     const orders = state.data.supplier_purchase_orders.filter((order) => order.order_date?.startsWith(state.month))
       .sort((a, b) => (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
@@ -632,10 +667,15 @@ async function saveModal(form) {
     }, id);
   }
   if (action === 'save-customer-order') {
+    const qtyOrder = num('qty_order');
+    const unitPrice = num('unit_price');
+    const tax = num('po_tax_amount');
+    if (qtyOrder <= 0) throw new Error('QTY PO harus lebih besar dari 0.');
+    if (!values.order_date) throw new Error('Tanggal PO wajib diisi.');
     return saveRow('customer_orders', {
-      order_date: values.order_date || null, due_date: values.due_date || null, po_number: values.po_number.trim(), customer: values.customer.trim(),
-      item: values.item.trim(), size: values.size.trim(), qty_order: num('qty_order'), qty_produced: num('qty_produced'),
-      qty_delivered: num('qty_delivered'), unit_price: num('unit_price'), amount: num('amount') || num('qty_order') * num('unit_price'),
+      order_date: values.order_date, due_date: values.due_date || null, po_number: values.po_number.trim(), customer: values.customer.trim(),
+      spm_skg: values.spm_skg.trim().toUpperCase(), item: values.item.trim(), size: values.size.trim(), qty_order: qtyOrder,
+      unit_price: unitPrice, amount: qtyOrder * unitPrice, po_tax_amount: tax, total_price: qtyOrder * unitPrice + tax,
     }, id);
   }
   if (action === 'save-production-event') {
@@ -667,7 +707,10 @@ async function saveModal(form) {
     return saveRow('supplier_purchase_orders', { items }, order.id);
   }
   if (action === 'save-quantities') {
-    return saveRow('customer_orders', { qty_produced: num('qty_produced'), qty_delivered: num('qty_delivered') }, values.order_id);
+    return saveRow('customer_orders', {
+      qty_produced: num('qty_produced'), qty_delivered: num('qty_delivered'), size_sheet: values.size_sheet.trim(),
+      floot: values.floot.trim(), score: values.score.trim(), height: values.height.trim(), score_secondary: values.score_secondary.trim(),
+    }, values.order_id);
   }
   if (action === 'confirm-delete') {
     const pending = state.pendingDelete;
@@ -808,6 +851,7 @@ async function handleClick(event) {
   if (action === 'signout') { await supabase.auth.signOut(); state.data = emptyData(); return; }
   if (action === 'new-cashflow') { cashflowModal(); return; }
   if (action === 'new-invoice') { invoiceModal(); return; }
+  if (action === 'new-customer-order') { customerOrderModal(); return; }
   if (action === 'new-supplier-bill') { supplierEntryModal('bill'); return; }
   if (action === 'new-supplier-payment') { supplierEntryModal('payment', button.dataset.supplier || ''); return; }
   if (action === 'new-production') { customerOrderModal(); return; }
@@ -857,7 +901,7 @@ async function handleClick(event) {
   if (action === 'edit-quantities') {
     const row = state.data.customer_orders.find((item) => item.id === button.dataset.id);
     if (!row) return;
-    openModal({ title: `Realisasi · ${row.po_number}`, action: 'save-quantities', submit: 'Simpan realisasi', body: `<input type="hidden" name="order_id" value="${row.id}"><div class="form-grid">${inputField('Jumlah diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Jumlah terkirim', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}</div><p class="form-hint">Simpan angka produksi dan pengiriman secara terpisah untuk membedakan kapasitas produksi dari proses distribusi.</p>` });
+    openModal({ title: `Realisasi · ${row.po_number}`, action: 'save-quantities', submit: 'Simpan realisasi', body: `<input type="hidden" name="order_id" value="${row.id}"><div class="form-grid">${inputField('Jumlah diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Delivery', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}${inputField('Size Sheet', 'size_sheet', row.size_sheet || '')}${inputField('Floot', 'floot', row.floot || '')}${inputField('Scoor', 'score', row.score || '')}${inputField('Tinggi', 'height', row.height || '')}${inputField('Scoor kedua', 'score_secondary', row.score_secondary || '')}</div><p class="form-hint">Nilai jual dihitung dari Delivery × PRICE. PPN realisasi mengikuti rumus workbook (11%); selisih kirim dan kurang jual dihitung otomatis.</p>` });
     return;
   }
   if (action === 'edit-shipped') {
@@ -922,6 +966,7 @@ function handleInput(event) {
   if (target.matches('[data-money-input]')) {
     formatMoneyInput(target);
     if (target.matches('[data-po-calc]')) updatePoPreview(target);
+    if (target.matches('[data-customer-order-calc]')) updateCustomerOrderPreview(target);
     return;
   }
   if (target.matches('[data-calc]')) {
@@ -934,6 +979,7 @@ function handleInput(event) {
     return;
   }
   if (target.matches('[data-po-calc]')) updatePoPreview(target);
+  if (target.matches('[data-customer-order-calc]')) updateCustomerOrderPreview(target);
 }
 
 async function handleChange(event) {

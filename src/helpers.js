@@ -134,3 +134,23 @@ export function orderProgress(order) {
   return ['pending', 'Belum mulai'];
 }
 
+export const CUSTOMER_VAT_RATE = 0.11;
+
+export function customerOrderFinancials(row) {
+  const qtyOrder = Number(row.qty_order || 0);
+  const qtyDelivered = Number(row.qty_delivered || 0);
+  const unitPrice = Number(row.unit_price || 0);
+  const amount = row.amount == null ? qtyOrder * unitPrice : Number(row.amount);
+  const tax = Number(row.po_tax_amount || 0);
+  const totalPrice = row.total_price == null ? amount + tax : Number(row.total_price);
+  const realizedAmount = qtyDelivered * unitPrice;
+  const realizedTax = realizedAmount * CUSTOMER_VAT_RATE;
+  const realizedTotal = realizedAmount + realizedTax;
+  return {
+    qtyOrder, qtyDelivered, unitPrice, amount, tax, totalPrice,
+    qtyDelta: qtyDelivered - qtyOrder,
+    realizedAmount, realizedTax, realizedTotal,
+    salesShortfall: totalPrice - realizedTotal,
+  };
+}
+

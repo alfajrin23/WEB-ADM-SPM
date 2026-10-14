@@ -14,7 +14,7 @@ const workspaceColumns = {
   supplier_ledger_entries: 'id, supplier, entry_date, entry_type, amount, description, created_at',
   sales_invoices: 'id, invoice_date, due_date, paid_date, customer, invoice_number, po_number, amount, paid_amount, outstanding_amount',
   supplier_purchase_orders: 'id, po_number, supplier, customer, order_date, items',
-  customer_orders: 'id, order_date, due_date, po_number, customer, item, size, qty_order, qty_produced, qty_delivered, unit_price, amount',
+  customer_orders: 'id, order_date, due_date, po_number, customer, spm_skg, item, size, qty_order, qty_produced, qty_delivered, unit_price, amount, po_tax_amount, total_price, size_sheet, floot, score, height, score_secondary',
   production_events: 'id, customer_order_id, event_date, cause_category, cause_detail, affected_qty, status',
 };
 

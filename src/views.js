@@ -1,5 +1,5 @@
 import {
-  CAUSES, CASH_CATEGORIES, downloadCsv, escapeHtml as esc, formatDate, icon, integer,
+  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, icon, integer,
   inMonth, monthName, orderProgress, rupiah, statusForInvoice,
 } from './helpers.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
@@ -52,6 +52,9 @@ function metricCards(data, month) {
   const ops = cash.filter((row) => row.kind === 'debit' && !String(row.category).toLowerCase().includes('gaji') && !['material bahan', 'subcon'].includes(String(row.category).toLowerCase())).reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const open = data.sales_invoices.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(Number(row.amount) - Number(row.paid_amount || 0), 0)), 0);
   const expenses = cash.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const customerOrders = data.customer_orders.filter((row) => inMonth(row.order_date, month));
+  const customerPoTotal = customerOrders.reduce((sum, row) => sum + customerOrderFinancials(row).totalPrice, 0);
+  const customerPoCount = new Set(customerOrders.map((row) => String(row.po_number || '').trim()).filter(Boolean)).size;
   return [
     card('Penjualan · invoice', money(sales), 'trend', 'green', `${invoices.length} invoice pada periode ini`),
     card('Bahan & subcon', money(materials), 'package', 'orange', 'Dari transaksi kas yang dikategorikan'),
@@ -59,6 +62,7 @@ function metricCards(data, month) {
     card('Gaji', money(wages), 'users', 'violet', 'Gaji staff dan produksi'),
     card('Margin indikatif', money(sales - expenses), 'chart', 'gold', 'Invoice dikurangi debit kas tercatat'),
     card('Outstanding invoice', money(open), 'file', 'red', `${data.sales_invoices.filter((row) => statusForInvoice(row)[0] !== 'paid').length} invoice belum lunas`),
+    card('Total PO Customer', money(customerPoTotal), 'package', 'violet', `${integer(customerPoCount)} PO · ${integer(customerOrders.length)} baris item pada periode ini`),
   ].join('');
 }
 
@@ -148,14 +152,16 @@ function cashflow(data, state) {
     balanceMap.set(row.id, running);
   }
   const filtered = all.filter((row) => inMonth(row.transaction_date, month) && (!state.category || row.category === state.category) && (!state.search || `${row.category} ${row.requester} ${row.description}`.toLowerCase().includes(state.search.toLowerCase())));
+  const summaryTransactions = all.filter((row) => inMonth(row.transaction_date, month) && row.kind === 'debit' && (!state.search || `${row.category} ${row.requester} ${row.description}`.toLowerCase().includes(state.search.toLowerCase())));
   const credit = filtered.filter((row) => row.kind === 'credit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const debit = filtered.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const categories = [...new Set([...CASH_CATEGORIES, ...data.cashflow_transactions.map((row) => row.category)])];
-  const categoryPills = categories.map((category) => {
-    const total = filtered.filter((row) => row.category === category).reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    if (!total) return '';
-    return `<button type="button" class="category-chip ${state.category === category ? 'selected' : ''}" data-act="filter-category" data-category="${esc(category)}"><span>${esc(category)}</span><b>${money(total)}</b></button>`;
-  }).join('');
+  const categoryTotals = categories.map((category) => ({
+    category,
+    total: summaryTransactions.filter((row) => row.category === category).reduce((sum, row) => sum + Number(row.amount || 0), 0),
+  })).filter((row) => row.total > 0).sort((a, b) => b.total - a.total);
+  const summaryTotal = summaryTransactions.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const categoryPills = `<article class="cash-category-card cash-category-total"><span class="cash-category-label">TOTAL KESELURUHAN</span><strong>${money(summaryTotal)}</strong><small>${integer(summaryTransactions.length)} transaksi pada periode ini</small></article>${categoryTotals.map(({ category, total }, index) => `<button type="button" class="cash-category-card ${state.category === category ? 'selected' : ''}" data-act="filter-category" data-category="${esc(category)}"><span class="cash-category-label cash-tone-${index % 8}">${esc(category)}</span><strong>${money(total)}</strong></button>`).join('')}`;
   const groups = new Map();
   filtered.forEach((row) => { const key = String(row.transaction_date || '').slice(0, 7) || 'tanpa tanggal'; groups.set(key, [...(groups.get(key) || []), row]); });
   const tableRows = [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([period, entries]) => {
@@ -166,8 +172,9 @@ function cashflow(data, state) {
   const endBalance = Number(settings.opening_balance || 0) + all.filter((row) => !settings.opening_balance_date || row.transaction_date >= settings.opening_balance_date).reduce((sum, row) => sum + (row.kind === 'credit' ? 1 : -1) * Number(row.amount || 0), 0);
   return `${pageHead('KEUANGAN', 'Cashflow', 'Lacak setiap rupiah masuk dan keluar, kategori biaya, serta saldo berjalan.', actionButton('Tambah transaksi', 'new-cashflow', '', 'plus'))}
     <section class="opening-card"><div><p class="eyebrow">SALDO AWAL</p><h2>${money(settings.opening_balance || 0)}</h2><p>Basis saldo dari ${formatDate(settings.opening_balance_date)}</p></div>${actionButton('Atur saldo awal', 'edit-opening', '', 'edit', 'secondary')}</section>
+    <div class="toolbar cashflow-period">${periodFilter(month)}</div>
     <div class="summary-grid">${statStrip('Saldo berjalan', money(endBalance))}${statStrip('Uang masuk', money(credit))}${statStrip('Uang keluar', money(debit))}${statStrip('Transaksi periode ini', integer(filtered.length))}</div>
-    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">KATEGORI</p><h2>Ringkas berdasarkan kategori</h2></div>${icon('filter', 20)}</div><div class="category-chips">${categoryPills || '<span class="subtle-note">Belum ada transaksi pada periode ini.</span>'}</div></section>
+    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">KATEGORI</p><h2>Ringkas berdasarkan kategori</h2><p>Total pengeluaran per kategori · ${esc(monthName(month))}</p></div>${icon('filter', 20)}</div><div class="cash-category-grid">${categoryPills}</div></section>
     <section class="panel"><div class="panel-heading"><div><p class="eyebrow">BUKU KAS</p><h2>Rincian transaksi</h2></div>${actionButton('Export CSV', 'export', 'data-kind="cashflow"', 'download', 'secondary')}</div>
       <div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari transaksi" data-filter="search" value="${esc(state.search)}" placeholder="Cari pengajuan atau keterangan"></label><select class="select-compact" data-filter="cashCategory"><option value="">Semua kategori</option>${categories.map((category) => `<option value="${esc(category)}" ${category === state.category ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></div>
       ${filtered.length ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Kategori</th><th>Pengaju</th><th>Keterangan</th><th class="numeric">Debit</th><th class="numeric">Kredit</th><th class="numeric">Saldo</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${tableRows}</tbody></table>`) : emptyState('Belum ada transaksi', 'Tambahkan transaksi pertama atau impor mutasi rekening BRI.', 'new-cashflow', 'Tambah transaksi', 'wallet')}
@@ -237,6 +244,27 @@ function invoices(data, state) {
     </section>`;
 }
 
+function customerOrders(data, state) {
+  const search = String(state.search || '').toLocaleLowerCase('id-ID');
+  const orders = data.customer_orders
+    .filter((row) => inMonth(row.order_date, state.month) && (!search || `${row.po_number} ${row.customer} ${row.spm_skg} ${row.item} ${row.size}`.toLocaleLowerCase('id-ID').includes(search)))
+    .sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''));
+  const totalPrice = orders.reduce((sum, row) => sum + customerOrderFinancials(row).totalPrice, 0);
+  const totalAmount = orders.reduce((sum, row) => sum + customerOrderFinancials(row).amount, 0);
+  const poCount = new Set(orders.map((row) => String(row.po_number || '').trim()).filter(Boolean)).size;
+  const lines = orders.map((row) => {
+    const values = customerOrderFinancials(row);
+    const deltaLabel = values.qtyDelta === 0 ? 'Sesuai' : values.qtyDelta < 0 ? 'Kurang kirim' : 'Lebih kirim';
+    const deltaTone = values.qtyDelta === 0 ? 'paid' : values.qtyDelta < 0 ? 'late' : 'partial';
+    return `<tr data-row-id="${row.id}"><td>${formatDate(row.order_date)}</td><td class="mono">${esc(row.po_number || '—')}</td><td>${esc(row.customer || '—')}</td><td><span class="tag">${esc(row.spm_skg || '—')}</span></td><td class="numeric">${integer(values.qtyOrder)}</td><td class="numeric"><span class="status status-${deltaTone}">${integer(values.qtyDelta)}</span><small class="table-sub">${deltaLabel}</small></td><td class="numeric">${money(values.unitPrice)}</td><td class="numeric">${money(values.amount)}</td><td class="numeric">${money(values.tax)}</td><td class="numeric">${money(values.totalPrice)}</td><td>${esc(row.size || '—')}</td><td>${esc(row.item || '—')}</td><td class="row-actions">${smallButton('Edit PO customer', 'edit', `data-table="customer_orders" data-id="${row.id}"`)}${smallButton('Hapus PO customer', 'delete', `data-table="customer_orders" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+  }).join('');
+  return `${pageHead('PESANAN CUSTOMER', 'PO Customer', 'Input PO per baris item. Total harga dan total price dihitung otomatis; realisasi kirim dan produksi dicatat terpisah.', `${actionButton('Performa produksi', 'navigate', 'data-tab="produksi"', 'factory', 'secondary')}${actionButton('Tambah PO', 'new-customer-order', '', 'plus')}`)}
+    <div class="summary-grid">${statStrip('Nilai total PO', money(totalPrice), `${integer(poCount)} nomor PO`)}${statStrip('Total harga sebelum PPN', money(totalAmount))}${statStrip('Baris item PO', integer(orders.length))}${statStrip('Periode aktif', esc(monthName(state.month)))}</div>
+    <section class="panel"><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari PO customer" data-filter="search" value="${esc(state.search)}" placeholder="Cari nomor PO, customer, atau item"></label>${periodFilter(state.month)}</div>
+      ${orders.length ? tableWrap(`<table class="customer-order-table"><thead><tr><th>TGL</th><th>NO PO</th><th>CUSTOMER</th><th>SPM/SKG</th><th class="numeric">QTY PO</th><th class="numeric">CLOSE/KURANG KIRIM</th><th class="numeric">PRICE</th><th class="numeric">TOTAL HARGA</th><th class="numeric">PPN</th><th class="numeric">TOTAL PRICE</th><th>SIZE</th><th>ITEM</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${lines}</tbody></table>`) : emptyState('Belum ada PO customer pada periode ini', 'Pilih bulan lain atau tambahkan PO customer baru.', 'new-customer-order', 'Tambah PO', 'package')}
+    </section>`;
+}
+
 function production(data, state) {
   const orders = data.customer_orders.filter((row) => inMonth(row.order_date, state.month) && (!state.search || `${row.po_number} ${row.customer} ${row.item}`.toLowerCase().includes(state.search.toLowerCase()))).sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''));
   const currentIds = new Set(orders.map((row) => row.id));
@@ -247,8 +275,9 @@ function production(data, state) {
   const lines = orders.map((row) => {
     const [key, label] = orderProgress(row);
     const progress = row.qty_order ? Math.min(100, Number(row.qty_delivered || 0) / Number(row.qty_order) * 100) : 0;
+    const values = customerOrderFinancials(row);
     const reasons = data.production_events.filter((event) => event.customer_order_id === row.id && event.status === 'open');
-    return `<tr class="production-${key}" data-row-id="${row.id}"><td>${formatDate(row.order_date)}</td><td>${formatDate(row.due_date)}</td><td class="mono">${esc(row.po_number || '—')}</td><td>${esc(row.customer)}</td><td>${esc(row.item)}<small class="table-sub">${esc(row.size || '')}</small></td><td class="numeric">${integer(row.qty_order)}</td><td class="numeric">${integer(row.qty_produced)}</td><td class="numeric">${integer(row.qty_delivered)}</td><td><div class="table-progress"><i style="width:${progress}%"></i></div><small>${progress.toFixed(0)}%</small></td><td><span class="status status-${key}">${esc(label)}</span>${reasons.length ? `<small class="table-sub">${reasons.length} kendala aktif</small>` : ''}</td><td class="row-actions">${smallButton('Catat kendala', 'new-event', `data-order="${row.id}"`, 'alert')}${smallButton('Update realisasi', 'edit-quantities', `data-id="${row.id}"`)}${smallButton('Edit PO', 'edit', `data-table="customer_orders" data-id="${row.id}"`)}${smallButton('Hapus PO', 'delete', `data-table="customer_orders" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+    return `<tr class="production-${key}" data-row-id="${row.id}"><td>${formatDate(row.order_date)}</td><td>${formatDate(row.due_date)}</td><td class="mono">${esc(row.po_number || '—')}</td><td>${esc(row.customer || '—')}</td><td><span class="tag">${esc(row.spm_skg || '—')}</span></td><td>${esc(row.item || '—')}<small class="table-sub">${esc(row.size || '')}</small></td><td class="numeric">${integer(values.qtyOrder)}</td><td class="numeric">${integer(row.qty_produced)}</td><td class="numeric">${integer(values.qtyDelivered)}</td><td class="numeric"><span class="status status-${values.qtyDelta === 0 ? 'paid' : values.qtyDelta < 0 ? 'late' : 'partial'}">${integer(values.qtyDelta)}</span></td><td class="numeric">${money(values.realizedAmount)}</td><td class="numeric">${money(values.realizedTax)}</td><td class="numeric">${money(values.realizedTotal)}</td><td class="numeric">${money(values.salesShortfall)}</td><td>${esc(row.size_sheet || '—')}</td><td>${esc(row.floot || '—')}</td><td>${esc(row.score || '—')}</td><td>${esc(row.height || '—')}</td><td>${esc(row.score_secondary || '—')}</td><td><div class="table-progress"><i style="width:${progress}%"></i></div><small>${progress.toFixed(0)}%</small></td><td><span class="status status-${key}">${esc(label)}</span>${reasons.length ? `<small class="table-sub">${reasons.length} kendala aktif</small>` : ''}</td><td class="row-actions">${smallButton('Catat kendala', 'new-event', `data-order="${row.id}"`, 'alert')}${smallButton('Update realisasi', 'edit-quantities', `data-id="${row.id}"`)}${smallButton('Edit PO', 'edit', `data-table="customer_orders" data-id="${row.id}"`)}${smallButton('Hapus PO', 'delete', `data-table="customer_orders" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
   }).join('');
   const eventRows = events.map((row) => {
     const order = data.customer_orders.find((item) => item.id === row.customer_order_id);
@@ -257,8 +286,8 @@ function production(data, state) {
   }).join('');
   return `${pageHead('OPERASIONAL', 'Performa produksi', 'Bandingkan pesanan, jumlah diproduksi, dan jumlah terkirim. Catat penyebab dengan bukti pada PO yang tertahan.', actionButton('Catat PO customer', 'new-production', '', 'plus'))}
     <div class="summary-grid">${statStrip('Jumlah pesanan', integer(ordered), `${orders.length} baris PO`)}${statStrip('Sudah terkirim', integer(delivered), ordered ? `${(delivered / ordered * 100).toFixed(1).replace('.', ',')}% dari pesanan` : 'Belum ada jumlah pesanan')}${statStrip('Kesenjangan kirim', integer(Math.max(ordered - delivered, 0)))}${statStrip('Lewat tanggal janji', integer(overdue))}</div>
-    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">ALUR CUSTOMER</p><h2>Pesanan & realisasi</h2><p>Baris tanpa tanggal janji tetap terlihat, tetapi tidak dihitung terlambat.</p></div>${actionButton('Export CSV', 'export', 'data-kind="production"', 'download', 'secondary')}</div><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari PO customer" data-filter="search" value="${esc(state.search)}" placeholder="Cari PO, customer, atau barang"></label></div>
-      ${orders.length ? tableWrap(`<table><thead><tr><th>Tanggal PO</th><th>Janji kirim</th><th>No. PO</th><th>Customer</th><th>Barang</th><th>Qty pesan</th><th>Qty produksi</th><th>Qty kirim</th><th>Progres</th><th>Status / kendala</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${lines}</tbody></table>`) : emptyState('Belum ada PO customer', 'Impor lembar PO COSTUMER atau tambahkan pesanan pertama.', 'new-production', 'Tambah PO customer', 'factory')}
+    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">ALUR CUSTOMER</p><h2>Pesanan & realisasi</h2><p>Selisih kirim = Delivery − QTY PO. Nilai jual = Delivery × PRICE; PPN realisasi mengikuti rumus 11% pada workbook.</p></div>${actionButton('Export CSV', 'export', 'data-kind="production"', 'download', 'secondary')}</div><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari PO customer" data-filter="search" value="${esc(state.search)}" placeholder="Cari PO, customer, atau barang"></label>${periodFilter(state.month)}</div>
+      ${orders.length ? tableWrap(`<table class="production-performance-table"><thead><tr><th>Tanggal PO</th><th>Janji kirim</th><th>No. PO</th><th>Customer</th><th>SPM/SKG</th><th>Item / Size</th><th>QTY PO</th><th>Diproduksi</th><th>Delivery</th><th>Close/Kurang kirim</th><th>Jumlah jual</th><th>PPN jual</th><th>Jumlah jual+PPN</th><th>Kurang jual</th><th>Size Sheet</th><th>Floot</th><th>Scoor</th><th>Tinggi</th><th>Scoor 2</th><th>Progres</th><th>Status / kendala</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${lines}</tbody></table>`) : emptyState('Belum ada PO customer', 'Tambahkan PO customer terlebih dahulu.', 'new-customer-order', 'Tambah PO customer', 'factory')}
     </section>
     <section class="panel"><div class="panel-heading"><div><p class="eyebrow">CATATAN PENYEBAB</p><h2>Kendala terbuka</h2><p>Rekap ini menunjukkan sebab yang dicatat, bukan sebab yang disimpulkan dari selisih.</p></div><div class="heading-actions">${actionButton('Export CSV', 'export', 'data-kind="events"', 'download', 'secondary')}${actionButton('Catat kendala', 'new-event', '', 'plus', 'secondary')}</div></div>
       ${events.length ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>PO customer</th><th>Kategori</th><th>Catatan</th><th>Unit terdampak</th><th>Status</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${eventRows}</tbody></table>`) : emptyState('Belum ada kendala yang dicatat', 'Pilih sebuah PO lalu catat apakah hambatan berasal dari administrasi, bahan, proses produksi, kualitas, atau pengiriman.', orders.length ? 'new-event' : 'new-production', orders.length ? 'Catat kendala' : 'Tambah PO customer', 'alert')}
@@ -388,6 +417,7 @@ export function renderPage(tab, data, state) {
     cashflow: () => cashflow(data, state),
     piutang: () => payables(data, state),
     tagihan: () => invoices(data, state),
+    'po-customer': () => customerOrders(data, state),
     produksi: () => production(data, state),
     supplier: () => supplierOrders(data, state),
     kalkulator: () => calculator(state),
@@ -400,6 +430,7 @@ export function renderPage(tab, data, state) {
 export const pageTabs = [
   ['dashboard', 'Ringkasan', 'home'], ['cashflow', 'Cashflow', 'wallet'],
   ['piutang', 'Piutang', 'users'], ['tagihan', 'Tagihan', 'file'],
+  ['po-customer', 'PO Customer', 'package'],
   ['produksi', 'Produksi', 'factory'], ['supplier', 'PO Supplier', 'package'],
   ['kalkulator', 'Kalkulator', 'calculator'], ['impor', 'Impor data', 'upload'],
   ['logs-input', 'Log Input', 'file'],

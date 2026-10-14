@@ -80,33 +80,54 @@ function parseCustomerOrders(rows, headerIndex, rowOffset, file, sheetName) {
   const orderDate = col('TGL');
   const poNumber = col('NO PO');
   const customer = header.findIndex((value) => value.includes('COSTUMER') || value.includes('CUSTOMER'));
+  const orderType = col('SPM/SKG');
   const qtyOrder = col('QTY PO');
   const delivered = col('DELIVERY');
   const unitPrice = col('PRICE');
   const amount = col('TOTAL HARGA');
-  const actualAmount = col('JUMLAH JUAL');
+  const tax = col('PPN');
+  const totalPrice = col('TOTAL PRICE');
   const item = col('ITEM');
   const size = col('SIZE');
   const sizeSheet = col('SIZE SHEET');
+  const floot = col('FLOOT');
+  const scores = header.flatMap((value, index) => value === 'SCOOR' ? [index] : []);
+  const height = col('TINGGI');
   const records = [];
+  const current = { order_date: null, po_number: '', customer: '', spm_skg: '' };
   rows.slice(headerIndex + 1).forEach((row, index) => {
-    const po = clean(row[poNumber]);
-    const name = clean(row[customer]);
+    const date = dateValue(row[orderDate]);
+    if (date) current.order_date = date;
+    if (clean(row[poNumber])) current.po_number = clean(row[poNumber]);
+    if (clean(row[customer])) current.customer = clean(row[customer]);
+    if (clean(row[orderType])) current.spm_skg = clean(row[orderType]).toUpperCase();
+    const po = current.po_number;
+    const name = current.customer;
     const product = clean(row[item]);
     const quantity = toNumber(row[qtyOrder]);
     if (!po || !name || !product || quantity <= 0) return;
     const price = toNumber(row[unitPrice]);
+    const poAmount = toNumber(row[amount]) || quantity * price;
+    const poTax = toNumber(row[tax]);
     records.push({
-      order_date: dateValue(row[orderDate]) || null,
+      order_date: current.order_date,
       po_number: po,
       customer: name,
+      spm_skg: current.spm_skg,
       item: product,
-      size: [clean(row[size]), clean(row[sizeSheet])].filter(Boolean).join(' · '),
+      size: clean(row[size]),
       qty_order: quantity,
       qty_produced: 0,
       qty_delivered: toNumber(row[delivered]),
       unit_price: price,
-      amount: toNumber(row[amount]) || quantity * price,
+      amount: poAmount,
+      po_tax_amount: poTax,
+      total_price: toNumber(row[totalPrice]) || poAmount + poTax,
+      size_sheet: clean(row[sizeSheet]),
+      floot: clean(row[floot]),
+      score: clean(row[scores[0]]),
+      height: clean(row[height]),
+      score_secondary: clean(row[scores[1]]),
       source_key: sourceKey(file.name, sheetName, rowOffset + headerIndex + index + 2),
     });
   });
