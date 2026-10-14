@@ -126,7 +126,7 @@ function render() {
       <nav class="main-nav" aria-label="Menu utama">${tabs}</nav>
       <div class="account-menu"><span class="account-dot"></span><span class="account-email">${esc(displayName)}</span><button type="button" class="icon-button" aria-label="Keluar" title="Keluar" data-act="signout">${icon('logout', 17)}</button></div>
     </header>
-    <main class="workspace"><div class="workspace-tools"><div><span class="live-dot"></span><span>Data tersimpan di Supabase</span></div>${state.tab === 'tagihan' ? '' : `<label class="month-control"><span>Periode</span><input aria-label="Pilih periode" data-filter="month" type="month" value="${esc(state.month)}"></label>`}</div>
+    <main class="workspace"><div class="workspace-tools"><div><span class="live-dot"></span><span>Data tersimpan di Supabase</span></div>${['tagihan', 'produksi', 'po-customer', 'supplier'].includes(state.tab) ? '' : `<label class="month-control"><span>Periode</span><input aria-label="Pilih periode" data-filter="month" type="month" value="${esc(state.month)}"></label>`}</div>
       ${state.loadError ? `<div class="notice notice-warn setup-notice">${icon('alert', 18)}<span>${esc(state.loadError)}</span></div>` : ''}
       ${state.loading ? `<div class="loading-grid">${Array.from({ length: 6 }, () => '<div class="skeleton-card"></div>').join('')}</div>` : renderPage(state.tab, state.data, state)}
       <footer class="app-footer"><span>CV Surya Pratama Mandiri</span><span>Keuangan · PO · Produksi</span></footer>

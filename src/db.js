@@ -17,6 +17,16 @@ const workspaceColumns = {
   customer_orders: 'id, order_date, due_date, po_number, customer, spm_skg, item, size, qty_order, qty_produced, qty_delivered, unit_price, amount, po_tax_amount, total_price, size_sheet, floot, score, height, score_secondary',
   production_events: 'id, customer_order_id, event_date, cause_category, cause_detail, affected_qty, status',
 };
+const workspaceOrderColumns = {
+  company_settings: 'owner_id',
+  cashflow_transactions: 'id',
+  supplier_ledger_entries: 'id',
+  sales_invoices: 'id',
+  supplier_purchase_orders: 'id',
+  customer_orders: 'id',
+  production_events: 'id',
+};
+const workspacePageSize = 500;
 
 export function setWorkspaceId(workspaceId) {
   activeWorkspaceId = workspaceId || null;
@@ -35,10 +45,20 @@ export async function loadProfile(userId) {
 export async function loadWorkspace(tables = Object.keys(workspaceColumns)) {
   const requestedTables = [...new Set(tables)].filter((table) => workspaceColumns[table]);
   if (!requestedTables.length) return {};
-  const results = await Promise.all(requestedTables.map((table) => supabase.from(table).select(workspaceColumns[table])));
-  const error = results.find((result) => result.error)?.error;
-  if (error) throw error;
-  return Object.fromEntries(requestedTables.map((table, index) => [table, results[index].data || []]));
+  const results = await Promise.all(requestedTables.map(async (table) => {
+    const rows = [];
+    for (let offset = 0; ; offset += workspacePageSize) {
+      const { data, error } = await supabase.from(table)
+        .select(workspaceColumns[table])
+        .order(workspaceOrderColumns[table], { ascending: true })
+        .range(offset, offset + workspacePageSize - 1);
+      if (error) throw error;
+      const page = data || [];
+      rows.push(...page);
+      if (page.length < workspacePageSize) return [table, rows];
+    }
+  }));
+  return Object.fromEntries(results);
 }
 
 export async function loadInputLogs(month) {
