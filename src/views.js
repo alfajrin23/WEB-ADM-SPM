@@ -119,56 +119,42 @@ function buildIncomePlan(data, month) {
   const balanceOf = (row) => Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0));
   const sumBalance = (rows) => rows.reduce((sum, row) => sum + balanceOf(row), 0);
   const lastDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+  const addDueInvoicesToWeeks = (rows, category) => {
+    const groups = new Map();
+    rows.forEach((row) => {
+      const date = String(row.due_date).slice(0, 10);
+      const customer = String(row.customer || 'Customer belum dicatat').trim() || 'Customer belum dicatat';
+      const key = `${date}::${customer.toLocaleLowerCase('id-ID')}`;
+      const group = groups.get(key) || { date, customer, count: 0, amount: 0, invoiceNumbers: [] };
+      group.count += 1;
+      group.amount += balanceOf(row);
+      const invoiceNumber = String(row.invoice_number || '').trim();
+      if (invoiceNumber) group.invoiceNumbers.push(invoiceNumber);
+      groups.set(key, group);
+    });
+    const dueRows = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date) || a.customer.localeCompare(b.customer, 'id-ID'));
+    dueRows.forEach((row) => {
+      const weekIndex = calendarWeekIndex(Number(row.date.slice(8, 10)), firstDayOffset);
+      addToWeek(weekIndex, {
+        category, date: row.date, dateLabel: formatDate(row.date), customer: row.customer,
+        note: 'Sesuai tanggal jatuh tempo', count: row.count,
+        invoiceNumbers: row.invoiceNumbers.sort((a, b) => a.localeCompare(b, 'id-ID')),
+        amount: row.amount,
+      });
+    });
+    return { amount: dueRows.reduce((sum, row) => sum + row.amount, 0), count: rows.length };
+  };
 
   plan.akebono = { amount: sumBalance(akebonoInvoices), count: akebonoInvoices.length };
   if (plan.akebono.count) addToWeek(weekCount - 1, {
     category: 'akebono',
-    dateLabel: formatDate(lastDate), customer: 'PT. AKEBONO BRAKE ASTRA INDONESIA',
+    date: lastDate, dateLabel: formatDate(lastDate), customer: 'PT. AKEBONO BRAKE ASTRA INDONESIA',
     note: 'Pembayaran akhir bulan', count: plan.akebono.count, amount: plan.akebono.amount,
   });
 
-  plan.eds = { amount: sumBalance(edsInvoices), count: edsInvoices.length };
-  if (plan.eds.count && weekCount) {
-    const totalCents = Math.round(plan.eds.amount * 100);
-    const baseCents = Math.floor(totalCents / weekCount);
-    const extraCents = totalCents % weekCount;
-    for (let index = 0; index < weekCount; index += 1) {
-      const week = plan.weeks[index];
-      const amount = (baseCents + (index < extraCents ? 1 : 0)) / 100;
-      addToWeek(index, {
-        category: 'eds',
-        dateLabel: `${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}`,
-        customer: 'PT. EDS MANUFACTURING IND',
-        note: 'Pembagian rata per pekan', count: plan.eds.count, weeklySplit: true, amount,
-      });
-    }
-  }
-
-  const otherGroups = new Map();
-  otherInvoices.forEach((row) => {
-    const date = String(row.due_date).slice(0, 10);
-    const customer = String(row.customer || 'Customer belum dicatat').trim() || 'Customer belum dicatat';
-    const key = `${date}::${customer.toLocaleLowerCase('id-ID')}`;
-    const group = otherGroups.get(key) || { date, customer, count: 0, amount: 0 };
-    group.count += 1;
-    group.amount += balanceOf(row);
-    otherGroups.set(key, group);
-  });
-  const otherRows = [...otherGroups.values()].sort((a, b) => a.date.localeCompare(b.date) || a.customer.localeCompare(b.customer, 'id-ID'));
-  plan.other = {
-    amount: otherRows.reduce((sum, row) => sum + row.amount, 0),
-    count: otherInvoices.length,
-  };
-  otherRows.forEach((row) => {
-    const day = Number(row.date.slice(8, 10));
-    const weekIndex = calendarWeekIndex(day, firstDayOffset);
-    addToWeek(weekIndex, {
-      category: 'other',
-      dateLabel: formatDate(row.date), customer: row.customer,
-      note: 'Sesuai tanggal jatuh tempo', count: row.count, amount: row.amount,
-    });
-  });
-  plan.weeks.forEach((week) => week.rows.sort((a, b) => a.customer.localeCompare(b.customer, 'id-ID')));
+  plan.eds = addDueInvoicesToWeeks(edsInvoices, 'eds');
+  plan.other = addDueInvoicesToWeeks(otherInvoices, 'other');
+  plan.weeks.forEach((week) => week.rows.sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.customer.localeCompare(b.customer, 'id-ID')));
   plan.invoiceCount = dueInvoices.length;
   plan.total = plan.weeks.reduce((sum, week) => sum + week.amount, 0);
   return plan;
@@ -184,7 +170,7 @@ function incomePlanCards(plan, weekIndex, period = 'week') {
   const eds = isMonthly ? plan.eds.amount : week.eds;
   const cards = [card('Rencana uang masuk', money(amount), 'wallet', 'green', isMonthly ? `Seluruh bulan · ${monthName(plan.month)}` : `Pekan ${integer(week.number)} · ${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}`)];
   if (akebono > 0) cards.push(card('Akebono', money(akebono), 'clock', 'violet', 'PT. AKEBONO BRAKE ASTRA INDONESIA · akhir bulan'));
-  if (eds > 0) cards.push(card('EDS', money(eds), 'wallet', 'blue', isMonthly ? 'PT. EDS MANUFACTURING IND · alokasi seluruh bulan' : `PT. EDS MANUFACTURING IND · alokasi pekan ${integer(week.number)}`));
+  if (eds > 0) cards.push(card('EDS', money(eds), 'wallet', 'blue', isMonthly ? 'PT. EDS MANUFACTURING IND · sesuai tanggal jatuh tempo' : `PT. EDS MANUFACTURING IND · jatuh tempo pekan ${integer(week.number)}`));
 
   const otherCustomers = new Map();
   rows.filter((row) => row.category === 'other').forEach((row) => {
@@ -212,7 +198,10 @@ function incomePlanWeeks(plan, weekIndex, period = 'week') {
   if (!isMonthly && !week) return '';
   const weeks = isMonthly ? plan.weeks : [week];
   const detailRows = weeks.flatMap((item) => item.rows);
-  const rows = detailRows.map((row) => `<div class="income-week-row"><div><strong>${esc(row.customer)}</strong><small>${esc(row.dateLabel)} · ${esc(row.note)} · ${integer(row.count)} invoice${row.weeklySplit ? ' sumber' : ''}</small></div><b>${money(row.amount)}</b></div>`).join('');
+  const rows = detailRows.map((row) => {
+    const invoiceNumbers = row.invoiceNumbers?.length ? ` · No. invoice ${row.invoiceNumbers.map((number) => esc(number)).join(', ')}` : '';
+    return `<div class="income-week-row"><div><strong>${esc(row.customer)}</strong><small>${esc(row.dateLabel)} · ${esc(row.note)}${invoiceNumbers} · ${integer(row.count)} invoice</small></div><b>${money(row.amount)}</b></div>`;
+  }).join('');
   const startDate = isMonthly ? plan.weeks[0]?.startDate : week.startDate;
   const endDate = isMonthly ? plan.weeks[plan.weeks.length - 1]?.endDate : week.endDate;
   const title = isMonthly ? `Rincian bulan ${monthName(plan.month)}` : `Rincian pekan ${integer(week.number)}`;
@@ -255,7 +244,7 @@ function dashboardIncomePlan(data, month, selectedWeek, period) {
 function invoiceIncomePlan(data, month, selectedWeek, period) {
   const plan = buildIncomePlan(data, month);
   const weekIndex = selectedIncomeWeekIndex(plan, month, selectedWeek);
-  const description = period === 'month' ? `Total rencana uang masuk dan rincian customer dari invoice outstanding selama ${monthName(month)}.` : 'Estimasi pekan terpilih dari invoice outstanding. EDS dibagi rata ke pekan dalam bulan ini.';
+  const description = period === 'month' ? `Total rencana uang masuk dan rincian customer dari invoice outstanding selama ${monthName(month)}.` : 'Estimasi pekan terpilih dari invoice outstanding berdasarkan tanggal jatuh tempo, termasuk invoice EDS.';
   return `<section class="panel income-plan-panel"><div class="panel-heading"><div><p class="eyebrow">PERENCANAAN KAS</p><h2>Rencana uang masuk · ${esc(monthName(month))}</h2><p>${description}</p></div><div class="income-plan-filters">${incomeWeekFilter(plan, weekIndex, period)}${periodFilter(month)}</div></div>
     ${incomePlanCards(plan, weekIndex, period)}
     ${incomePlanWeeks(plan, weekIndex, period)}
