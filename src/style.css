@@ -132,6 +132,15 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
 .cash-breakdown-grid { margin-bottom: 0; }
 .cash-breakdown-grid .metric-card,
 .cash-breakdown-grid .metric-card:nth-child(1), .cash-breakdown-grid .metric-card:nth-child(2) { min-height: 126px; }
+.income-plan-overview { margin: 2px 0 18px; }
+.income-plan-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin: 21px 0 12px; }
+.income-plan-heading h2 { margin: 0 0 5px; font: 800 1.12rem Manrope, sans-serif; }
+.income-plan-heading p:last-child { margin: 0; color: #839097; font-size: .72rem; line-height: 1.5; }
+.income-plan-cards { margin-bottom: 0; }
+.income-plan-cards .metric-card,
+.income-plan-cards .metric-card:nth-child(1), .income-plan-cards .metric-card:nth-child(2) { min-height: 126px; }
+.income-plan-panel .income-plan-cards { margin: 0 0 15px; }
+.income-plan-panel .notice { margin-top: 14px; }
 .focus-grid, .detail-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 14px; margin-bottom: 14px; }
 .detail-grid { grid-template-columns: 1fr 1fr; }
 .panel { min-width: 0; margin-bottom: 14px; padding: 21px; border: 1px solid var(--line); border-radius: 23px 23px 23px 9px; background: rgba(255, 254, 250, .94); box-shadow: 0 8px 26px rgba(48, 54, 55, .034); animation: slide-up .3s var(--ease) both; }
@@ -473,6 +482,10 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
   .panel-heading { gap: 8px; margin-bottom: 13px; }
   .panel-heading h2 { font-size: .94rem; }
   .panel-heading p:not(.eyebrow) { font-size: .67rem; }
+  .income-plan-heading { align-items: flex-start; flex-direction: column; gap: 6px; margin-top: 17px; }
+  .income-plan-heading h2 { font-size: .98rem; }
+  .income-plan-panel .panel-heading { flex-direction: column; }
+  .income-plan-panel .month-control { align-self: flex-start; }
   .delivery-line strong { font-size: 2rem; }
   .mini-stats { gap: 5px; }
   .mini-stats .stat-strip { padding: 9px 7px; }
