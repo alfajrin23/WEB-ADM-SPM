@@ -56,6 +56,7 @@ const state = {
   profilesLoaded: false,
   month: localISODate(new Date()).slice(0, 7),
   incomeWeek: null,
+  incomePlanPeriod: 'week',
   category: '',
   invoiceStatus: '',
   search: '',
@@ -992,7 +993,15 @@ async function handleChange(event) {
     } else render();
     return;
   }
-  if (target.matches('[data-filter="incomeWeek"]')) { state.incomeWeek = Number(target.value); render(); return; }
+  if (target.matches('[data-filter="incomeWeek"]')) {
+    if (target.value === 'month') state.incomePlanPeriod = 'month';
+    else {
+      state.incomePlanPeriod = 'week';
+      state.incomeWeek = Number(target.value);
+    }
+    render();
+    return;
+  }
   if (target.matches('[data-filter="cashCategory"]')) { state.category = target.value; render(); return; }
   if (target.matches('[data-filter="invoiceStatus"]')) { state.invoiceStatus = target.value; render(); return; }
   if (target.matches('[data-import-file]')) { await readImportFile(target.files?.[0]); return; }
