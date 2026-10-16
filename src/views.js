@@ -173,7 +173,23 @@ function incomePlanCards(plan, weekIndex) {
   const week = plan.weeks[weekIndex];
   if (!week) return '';
   const range = `${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}`;
-  return `<div class="metric-grid income-plan-cards">${card('Rencana uang masuk', money(week.amount), 'wallet', 'green', `Pekan ${integer(week.number)} · ${range}`)}${card('Akebono', money(week.akebono), 'clock', 'violet', 'PT. AKEBONO BRAKE ASTRA INDONESIA · akhir bulan')}${card('EDS', money(week.eds), 'wallet', 'blue', `PT. EDS MANUFACTURING IND · alokasi pekan ${integer(week.number)}`)}${card('Customer lain', money(week.other), 'file', 'gold', 'Mengikuti tanggal jatuh tempo invoice')}</div>`;
+  const cards = [card('Rencana uang masuk', money(week.amount), 'wallet', 'green', `Pekan ${integer(week.number)} · ${range}`)];
+  if (week.akebono > 0) cards.push(card('Akebono', money(week.akebono), 'clock', 'violet', 'PT. AKEBONO BRAKE ASTRA INDONESIA · akhir bulan'));
+  if (week.eds > 0) cards.push(card('EDS', money(week.eds), 'wallet', 'blue', `PT. EDS MANUFACTURING IND · alokasi pekan ${integer(week.number)}`));
+
+  const otherCustomers = new Map();
+  week.rows.filter((row) => row.category === 'other').forEach((row) => {
+    const key = row.customer.toLocaleLowerCase('id-ID');
+    const customer = otherCustomers.get(key) || { name: row.customer, amount: 0, count: 0 };
+    customer.amount += row.amount;
+    customer.count += row.count;
+    otherCustomers.set(key, customer);
+  });
+  [...otherCustomers.values()].forEach((customer) => {
+    cards.push(card(customer.name, money(customer.amount), 'file', 'gold', `Sesuai tanggal jatuh tempo · ${integer(customer.count)} invoice`));
+  });
+
+  return `<div class="metric-grid income-plan-cards">${cards.join('')}</div>`;
 }
 
 function incomePlanNotice(plan) {
