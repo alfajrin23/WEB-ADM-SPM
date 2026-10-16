@@ -75,7 +75,30 @@ function buildIncomePlan(data, month) {
   const plan = {
     month, weekCount, total: 0, invoiceCount: 0,
     akebono: { amount: 0, count: 0 }, eds: { amount: 0, count: 0 }, other: { amount: 0, count: 0 },
-    missingDue: { amount: 0, count: 0 }, schedule: [],
+    missingDue: { amount: 0, count: 0 }, weeks: [],
+  };
+  plan.weeks = Array.from({ length: weekCount }, (_, index) => {
+    const startDay = index * 7 + 1;
+    const endDay = Math.min((index + 1) * 7, daysInMonth);
+    return {
+      number: index + 1,
+      startDay,
+      endDay,
+      startDate: `${month}-${String(startDay).padStart(2, '0')}`,
+      endDate: `${month}-${String(endDay).padStart(2, '0')}`,
+      amount: 0,
+      akebono: 0,
+      eds: 0,
+      other: 0,
+      rows: [],
+    };
+  });
+  const addToWeek = (index, row) => {
+    const week = plan.weeks[index];
+    if (!week) return;
+    week.rows.push(row);
+    week.amount += row.amount;
+    week[row.category] += row.amount;
   };
   const openInvoices = data.sales_invoices.filter((row) => Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0)) > 0);
   const missingDue = openInvoices.filter((row) => !row.due_date);
@@ -93,8 +116,9 @@ function buildIncomePlan(data, month) {
   const lastDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
 
   plan.akebono = { amount: sumBalance(akebonoInvoices), count: akebonoInvoices.length };
-  if (plan.akebono.count) plan.schedule.push({
-    date: lastDate, when: `Akhir bulan · ${formatDate(lastDate)}`, customer: 'PT. AKEBONO BRAKE ASTRA INDONESIA',
+  if (plan.akebono.count) addToWeek(weekCount - 1, {
+    category: 'akebono',
+    dateLabel: formatDate(lastDate), customer: 'PT. AKEBONO BRAKE ASTRA INDONESIA',
     note: 'Pembayaran akhir bulan', count: plan.akebono.count, amount: plan.akebono.amount,
   });
 
@@ -104,14 +128,13 @@ function buildIncomePlan(data, month) {
     const baseCents = Math.floor(totalCents / weekCount);
     const extraCents = totalCents % weekCount;
     for (let index = 0; index < weekCount; index += 1) {
-      const firstDay = index * 7 + 1;
-      const lastDayOfWeek = Math.min((index + 1) * 7, daysInMonth);
-      plan.schedule.push({
-        date: `${month}-${String(firstDay).padStart(2, '0')}`,
-        when: `Pekan ${index + 1} · ${firstDay}–${lastDayOfWeek}`,
+      const week = plan.weeks[index];
+      const amount = (baseCents + (index < extraCents ? 1 : 0)) / 100;
+      addToWeek(index, {
+        category: 'eds',
+        dateLabel: `${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}`,
         customer: 'PT. EDS MANUFACTURING IND',
-        note: `Pembagian rata dari ${integer(plan.eds.count)} invoice`, count: plan.eds.count,
-        amount: (baseCents + (index < extraCents ? 1 : 0)) / 100,
+        note: 'Pembagian rata per pekan', count: plan.eds.count, weeklySplit: true, amount,
       });
     }
   }
@@ -131,17 +154,26 @@ function buildIncomePlan(data, month) {
     amount: otherRows.reduce((sum, row) => sum + row.amount, 0),
     count: otherInvoices.length,
   };
-  plan.schedule.push(...otherRows.map((row) => ({
-    ...row, when: formatDate(row.date), note: 'Sesuai tanggal jatuh tempo',
-  })));
-  plan.schedule.sort((a, b) => a.date.localeCompare(b.date) || a.customer.localeCompare(b.customer, 'id-ID'));
+  otherRows.forEach((row) => {
+    const day = Number(row.date.slice(8, 10));
+    const weekIndex = Math.floor((day - 1) / 7);
+    addToWeek(weekIndex, {
+      category: 'other',
+      dateLabel: formatDate(row.date), customer: row.customer,
+      note: 'Sesuai tanggal jatuh tempo', count: row.count, amount: row.amount,
+    });
+  });
+  plan.weeks.forEach((week) => week.rows.sort((a, b) => a.customer.localeCompare(b.customer, 'id-ID')));
   plan.invoiceCount = dueInvoices.length;
-  plan.total = plan.akebono.amount + plan.eds.amount + plan.other.amount;
+  plan.total = plan.weeks.reduce((sum, week) => sum + week.amount, 0);
   return plan;
 }
 
-function incomePlanCards(plan) {
-  return `<div class="metric-grid income-plan-cards">${card('Rencana uang masuk', money(plan.total), 'wallet', 'green', `${integer(plan.invoiceCount)} invoice jatuh tempo pada ${esc(monthName(plan.month))}`)}${card('Akebono', money(plan.akebono.amount), 'clock', 'violet', 'PT. AKEBONO BRAKE ASTRA INDONESIA · akhir bulan')}${card('EDS', money(plan.eds.amount), 'wallet', 'blue', `PT. EDS MANUFACTURING IND · dibagi rata ke ${integer(plan.weekCount)} pekan`)}${card('Customer lain', money(plan.other.amount), 'file', 'gold', 'Mengikuti tanggal jatuh tempo invoice')}</div>`;
+function incomePlanCards(plan, weekIndex) {
+  const week = plan.weeks[weekIndex];
+  if (!week) return '';
+  const range = `${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}`;
+  return `<div class="metric-grid income-plan-cards">${card('Rencana uang masuk', money(week.amount), 'wallet', 'green', `Pekan ${integer(week.number)} · ${range}`)}${card('Akebono', money(week.akebono), 'clock', 'violet', 'PT. AKEBONO BRAKE ASTRA INDONESIA · akhir bulan')}${card('EDS', money(week.eds), 'wallet', 'blue', `PT. EDS MANUFACTURING IND · alokasi pekan ${integer(week.number)}`)}${card('Customer lain', money(week.other), 'file', 'gold', 'Mengikuti tanggal jatuh tempo invoice')}</div>`;
 }
 
 function incomePlanNotice(plan) {
@@ -149,17 +181,47 @@ function incomePlanNotice(plan) {
   return `<div class="notice notice-info">${icon('alert', 17)}<span>${integer(plan.missingDue.count)} invoice outstanding senilai ${money(plan.missingDue.amount)} belum masuk rencana karena tanggal jatuh temponya belum diisi.</span></div>`;
 }
 
-function dashboardIncomePlan(data, month) {
-  const plan = buildIncomePlan(data, month);
-  return `<section class="income-plan-overview"><div class="income-plan-heading"><div><p class="eyebrow">PERENCANAAN KAS · ${esc(monthName(month))}</p><h2>Rencana uang masuk</h2><p>Perkiraan dari invoice outstanding yang jatuh tempo pada bulan terpilih.</p></div><button type="button" class="text-button" data-act="navigate" data-tab="tagihan">Rincian tagihan ${icon('chevron', 15)}</button></div>${incomePlanCards(plan)}${incomePlanNotice(plan)}</section>`;
+function incomePlanWeeks(plan, weekIndex) {
+  const week = plan.weeks[weekIndex];
+  if (!week) return '';
+  const rows = week.rows.map((row) => `<div class="income-week-row"><div><strong>${esc(row.customer)}</strong><small>${esc(row.dateLabel)} · ${esc(row.note)} · ${integer(row.count)} invoice${row.weeklySplit ? ' sumber' : ''}</small></div><b>${money(row.amount)}</b></div>`).join('');
+  return `<section class="income-week-detail"><div class="income-week-detail-heading"><div><h3>Rincian pekan ${integer(week.number)}</h3><span>${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}</span></div><strong>${money(week.amount)}</strong></div>${rows ? `<div class="income-week-rows">${rows}</div>` : '<p class="income-week-empty">Belum ada rencana uang masuk pada pekan ini.</p>'}</section>`;
 }
 
-function invoiceIncomePlan(data, month) {
+function currentIncomeWeekIndex(month) {
+  const today = new Date();
+  const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  return month === currentMonth ? Math.floor((today.getDate() - 1) / 7) : 0;
+}
+
+function selectedIncomeWeekIndex(plan, month, selectedWeek) {
+  if (!plan.weeks.length) return 0;
+  const requested = Number(selectedWeek);
+  const fallback = currentIncomeWeekIndex(month);
+  const index = Number.isInteger(requested) && selectedWeek !== null && selectedWeek !== '' ? requested : fallback;
+  return Math.max(0, Math.min(index, plan.weeks.length - 1));
+}
+
+function incomeWeekFilter(plan, selectedWeekIndex) {
+  const options = plan.weeks.map((week, index) => {
+    const range = `${formatDate(week.startDate, { day: 'numeric', month: 'short' })}–${formatDate(week.endDate)}`;
+    return `<option value="${index}" ${index === selectedWeekIndex ? 'selected' : ''}>Pekan ${integer(week.number)} · ${range}</option>`;
+  }).join('');
+  return `<label class="income-week-control"><span>Tampilkan</span><select aria-label="Pilih pekan rencana uang masuk" data-filter="incomeWeek">${options}</select></label>`;
+}
+
+function dashboardIncomePlan(data, month, selectedWeek) {
   const plan = buildIncomePlan(data, month);
-  const schedule = plan.schedule.map((row) => `<tr><td>${esc(row.when)}</td><td>${esc(row.customer)}</td><td>${esc(row.note)}</td><td class="numeric">${integer(row.count)}</td><td class="numeric">${money(row.amount)}</td></tr>`).join('');
-  return `<section class="panel income-plan-panel"><div class="panel-heading"><div><p class="eyebrow">PERENCANAAN KAS</p><h2>Rencana uang masuk · ${esc(monthName(month))}</h2><p>Estimasi memakai sisa invoice yang jatuh tempo pada bulan ini. Jadwal ini bukan transaksi kas aktual.</p></div>${periodFilter(month)}</div>
-    ${incomePlanCards(plan)}
-    ${plan.schedule.length ? tableWrap(`<table><thead><tr><th>Jadwal</th><th>Customer</th><th>Aturan rencana</th><th class="numeric">Invoice</th><th class="numeric">Estimasi masuk</th></tr></thead><tbody>${schedule}<tr class="total-row"><td colspan="3">Total rencana bulan ini</td><td class="numeric">${integer(plan.invoiceCount)}</td><td class="numeric">${money(plan.total)}</td></tr></tbody></table>`) : emptyState('Belum ada rencana penerimaan', `Tidak ada invoice outstanding dengan tanggal jatuh tempo pada ${monthName(month)}.`, '', '', 'wallet')}
+  const weekIndex = selectedIncomeWeekIndex(plan, month, selectedWeek);
+  return `<section class="income-plan-overview"><div class="income-plan-heading"><div><p class="eyebrow">PERENCANAAN KAS · ${esc(monthName(month))}</p><h2>Rencana uang masuk</h2><p>Estimasi pekan terpilih, dirinci berdasarkan customer dan tanggal rencana.</p></div><div class="income-plan-actions">${incomeWeekFilter(plan, weekIndex)}<button type="button" class="text-button" data-act="navigate" data-tab="tagihan">Rincian tagihan ${icon('chevron', 15)}</button></div></div>${incomePlanCards(plan, weekIndex)}${incomePlanWeeks(plan, weekIndex)}${incomePlanNotice(plan)}</section>`;
+}
+
+function invoiceIncomePlan(data, month, selectedWeek) {
+  const plan = buildIncomePlan(data, month);
+  const weekIndex = selectedIncomeWeekIndex(plan, month, selectedWeek);
+  return `<section class="panel income-plan-panel"><div class="panel-heading"><div><p class="eyebrow">PERENCANAAN KAS</p><h2>Rencana uang masuk · ${esc(monthName(month))}</h2><p>Estimasi pekan terpilih dari invoice outstanding. EDS dibagi rata ke pekan dalam bulan ini.</p></div><div class="income-plan-filters">${incomeWeekFilter(plan, weekIndex)}${periodFilter(month)}</div></div>
+    ${incomePlanCards(plan, weekIndex)}
+    ${incomePlanWeeks(plan, weekIndex)}
     ${incomePlanNotice(plan)}
   </section>`;
 }
@@ -263,7 +325,7 @@ function dashboard(data, state) {
   const balance = Number(data.company_settings[0]?.opening_balance || 0) + data.cashflow_transactions.filter((row) => !data.company_settings[0]?.opening_balance_date || row.transaction_date >= data.company_settings[0].opening_balance_date).reduce((sum, row) => sum + (row.kind === 'credit' ? 1 : -1) * Number(row.amount || 0), 0);
   return `${pageHead('RINGKASAN · ' + monthName(month), 'Kinerja dalam satu pandangan', 'Lihat arus uang, posisi invoice, serta selisih pesanan dengan hasil kirim. Angka mengikuti data yang sudah dicatat.', actionButton('Impor data', 'open-import', '', 'upload', 'secondary'))}${monthPills}
     <div class="metric-grid">${metricCards(data, month)}</div>
-    ${dashboardIncomePlan(data, month)}
+    ${dashboardIncomePlan(data, month, state.incomeWeek)}
     ${cashCategoryCards(data, month)}
     <section class="focus-grid">
       <article class="panel production-focus"><div class="panel-heading"><div><p class="eyebrow">PESANAN CUSTOMER</p><h2>Realisasi kirim</h2><p>Jumlah barang yang dikirim dibanding jumlah yang dipesan.</p></div><span class="focus-icon">${icon('factory', 22)}</span></div>
@@ -389,7 +451,7 @@ function invoices(data, state) {
     return `${customerHeading}<tr class="invoice-${key}" data-row-id="${row.id}"><td>${formatDate(row.invoice_date)}</td><td>${formatDate(row.due_date)}</td><td>${formatDate(row.paid_date)}</td><td class="mono">${esc(row.invoice_number)}</td><td class="mono">${esc(row.po_number || '—')}</td><td class="numeric">${money(row.amount)}</td><td class="numeric">${money(amount)}</td><td><button class="status status-${key} status-button" type="button" data-act="toggle-invoice" data-id="${row.id}" title="Klik untuk mengubah status">${key === 'paid' ? icon('check', 13) : key === 'late' ? icon('alert', 13) : icon('clock', 13)}${esc(label)}</button></td><td class="row-actions">${smallButton('Edit invoice', 'edit', `data-table="sales_invoices" data-id="${row.id}"`)}${smallButton('Hapus invoice', 'delete', `data-table="sales_invoices" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
   }).join('');
   return `${pageHead('KEUANGAN', 'Tagihan customer', 'Pantau tanggal jatuh tempo dan pembayaran invoice tanpa mencampur nilai tagihan dengan kas masuk.', actionButton('Invoice baru', 'new-invoice', '', 'plus'))}
-    ${invoiceIncomePlan(data, state.month)}
+    ${invoiceIncomePlan(data, state.month, state.incomeWeek)}
     <div class="summary-grid">${statStrip('Nilai invoice', money(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)))}${statStrip('Outstanding', money(balance))}${statStrip('Terlambat', integer(rows.filter((row) => statusForInvoice(row)[0] === 'late').length))}${statStrip('Invoice', integer(rows.length))}</div>
     <section class="panel"><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari invoice" data-filter="search" value="${esc(state.search)}" placeholder="Cari customer, PO, atau invoice"></label><select class="select-compact" data-filter="invoiceStatus"><option value="">Semua status</option><option value="open" ${state.invoiceStatus === 'open' ? 'selected' : ''}>Belum dibayar</option><option value="late" ${state.invoiceStatus === 'late' ? 'selected' : ''}>Jatuh tempo</option><option value="partial" ${state.invoiceStatus === 'partial' ? 'selected' : ''}>Sebagian dibayar</option><option value="paid" ${state.invoiceStatus === 'paid' ? 'selected' : ''}>Lunas</option></select>${actionButton('Export CSV', 'export', 'data-kind="invoices"', 'download', 'secondary')}</div>
       ${rows.length ? tableWrap(`<table><thead><tr><th>Tanggal invoice</th><th>Jatuh tempo</th><th>Tanggal pelunasan</th><th>No. invoice</th><th>No. PO</th><th>Nilai</th><th>Sisa</th><th>Status</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${table}</tbody></table>`) : emptyState('Belum ada invoice', 'Tambahkan tagihan customer atau impor workbook OS CARTON BOX.', 'new-invoice', 'Tambah invoice', 'file')}

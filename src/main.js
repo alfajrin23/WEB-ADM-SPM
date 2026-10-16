@@ -55,6 +55,7 @@ const state = {
   profiles: [],
   profilesLoaded: false,
   month: localISODate(new Date()).slice(0, 7),
+  incomeWeek: null,
   category: '',
   invoiceStatus: '',
   search: '',
@@ -991,6 +992,7 @@ async function handleChange(event) {
     } else render();
     return;
   }
+  if (target.matches('[data-filter="incomeWeek"]')) { state.incomeWeek = Number(target.value); render(); return; }
   if (target.matches('[data-filter="cashCategory"]')) { state.category = target.value; render(); return; }
   if (target.matches('[data-filter="invoiceStatus"]')) { state.invoiceStatus = target.value; render(); return; }
   if (target.matches('[data-import-file]')) { await readImportFile(target.files?.[0]); return; }
