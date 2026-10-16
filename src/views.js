@@ -45,16 +45,13 @@ function statStrip(label, value, caption = '') {
 
 function metricCards(data, month) {
   const invoices = data.sales_invoices.filter((row) => inMonth(row.invoice_date, month));
-  const cash = data.cashflow_transactions.filter((row) => inMonth(row.transaction_date, month));
   const sales = invoices.reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const open = data.sales_invoices.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(Number(row.amount) - Number(row.paid_amount || 0), 0)), 0);
-  const expenses = cash.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const customerOrders = data.customer_orders.filter((row) => inMonth(row.order_date, month));
   const customerPoTotal = customerOrders.reduce((sum, row) => sum + customerOrderFinancials(row).totalPrice, 0);
   const customerPoCount = new Set(customerOrders.map((row) => String(row.po_number || '').trim()).filter(Boolean)).size;
   return [
     card('Penjualan · invoice', money(sales), 'trend', 'green', `${invoices.length} invoice pada periode ini`),
-    card('Margin indikatif', money(sales - expenses), 'chart', 'gold', 'Invoice dikurangi debit kas tercatat'),
     card('Outstanding invoice', money(open), 'file', 'red', `${data.sales_invoices.filter((row) => statusForInvoice(row)[0] !== 'paid').length} invoice belum lunas`),
     card('Total PO Customer', money(customerPoTotal), 'package', 'violet', `${integer(customerPoCount)} PO · ${integer(customerOrders.length)} baris item pada periode ini`),
   ].join('');
