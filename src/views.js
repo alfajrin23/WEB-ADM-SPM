@@ -47,9 +47,6 @@ function metricCards(data, month) {
   const invoices = data.sales_invoices.filter((row) => inMonth(row.invoice_date, month));
   const cash = data.cashflow_transactions.filter((row) => inMonth(row.transaction_date, month));
   const sales = invoices.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const materials = cash.filter((row) => ['material bahan', 'subcon'].includes(String(row.category).toLowerCase()) && row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const wages = cash.filter((row) => String(row.category).toLowerCase().includes('gaji') && row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const ops = cash.filter((row) => row.kind === 'debit' && !String(row.category).toLowerCase().includes('gaji') && !['material bahan', 'subcon'].includes(String(row.category).toLowerCase())).reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const open = data.sales_invoices.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(Number(row.amount) - Number(row.paid_amount || 0), 0)), 0);
   const expenses = cash.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const customerOrders = data.customer_orders.filter((row) => inMonth(row.order_date, month));
@@ -57,13 +54,37 @@ function metricCards(data, month) {
   const customerPoCount = new Set(customerOrders.map((row) => String(row.po_number || '').trim()).filter(Boolean)).size;
   return [
     card('Penjualan · invoice', money(sales), 'trend', 'green', `${invoices.length} invoice pada periode ini`),
-    card('Bahan & subcon', money(materials), 'package', 'orange', 'Dari transaksi kas yang dikategorikan'),
-    card('Operasional', money(ops), 'factory', 'blue', 'Termasuk fee market, listrik, dan biaya lain'),
-    card('Gaji', money(wages), 'users', 'violet', 'Gaji staff dan produksi'),
     card('Margin indikatif', money(sales - expenses), 'chart', 'gold', 'Invoice dikurangi debit kas tercatat'),
     card('Outstanding invoice', money(open), 'file', 'red', `${data.sales_invoices.filter((row) => statusForInvoice(row)[0] !== 'paid').length} invoice belum lunas`),
     card('Total PO Customer', money(customerPoTotal), 'package', 'violet', `${integer(customerPoCount)} PO · ${integer(customerOrders.length)} baris item pada periode ini`),
   ].join('');
+}
+
+function cashCategorySummary(data, month) {
+  const cash = data.cashflow_transactions.filter((row) => inMonth(row.transaction_date, month));
+  const groups = new Map(CASH_CATEGORIES.map((category) => [category.toLocaleLowerCase('id-ID'), {
+    category, count: 0, incoming: 0, outgoing: 0,
+  }]));
+
+  cash.forEach((row) => {
+    const category = String(row.category || '').trim() || 'Lainnya';
+    const key = category.toLocaleLowerCase('id-ID');
+    const group = groups.get(key) || { category, count: 0, incoming: 0, outgoing: 0 };
+    group.count += 1;
+    if (row.kind === 'credit') group.incoming += Number(row.amount || 0);
+    else group.outgoing += Number(row.amount || 0);
+    groups.set(key, group);
+  });
+
+  const rows = [...groups.values()].filter((group) => group.count > 0);
+  const count = rows.reduce((sum, group) => sum + group.count, 0);
+  const incoming = rows.reduce((sum, group) => sum + group.incoming, 0);
+  const outgoing = rows.reduce((sum, group) => sum + group.outgoing, 0);
+  const table = rows.map((group) => `<tr><td>${esc(group.category)}</td><td class="numeric">${integer(group.count)}</td><td class="numeric">${money(group.incoming)}</td><td class="numeric">${money(group.outgoing)}</td></tr>`).join('');
+
+  return `<section class="panel"><div class="panel-heading"><div><p class="eyebrow">TRANSAKSI KAS</p><h2>Rekap kas per kategori</h2><p>Uang masuk dan pengeluaran dipisahkan berdasarkan kategori pada ${esc(monthName(month))}. Penjualan invoice dihitung terpisah.</p></div></div>
+    ${rows.length ? tableWrap(`<table><thead><tr><th>Kategori</th><th class="numeric">Transaksi</th><th class="numeric">Uang masuk</th><th class="numeric">Pengeluaran</th></tr></thead><tbody>${table}<tr><th>Total kas</th><th class="numeric">${integer(count)}</th><th class="numeric">${money(incoming)}</th><th class="numeric">${money(outgoing)}</th></tr></tbody></table>`) : emptyState('Belum ada transaksi kas', `Belum ada transaksi kas pada ${monthName(month)}.`, '', '', 'trend')}
+  </section>`;
 }
 
 function productionSummary(data, month) {
@@ -119,6 +140,7 @@ function dashboard(data, state) {
   const balance = Number(data.company_settings[0]?.opening_balance || 0) + data.cashflow_transactions.filter((row) => !data.company_settings[0]?.opening_balance_date || row.transaction_date >= data.company_settings[0].opening_balance_date).reduce((sum, row) => sum + (row.kind === 'credit' ? 1 : -1) * Number(row.amount || 0), 0);
   return `${pageHead('RINGKASAN · ' + monthName(month), 'Kinerja dalam satu pandangan', 'Lihat arus uang, posisi invoice, serta selisih pesanan dengan hasil kirim. Angka mengikuti data yang sudah dicatat.', actionButton('Impor data', 'open-import', '', 'upload', 'secondary'))}${monthPills}
     <div class="metric-grid">${metricCards(data, month)}</div>
+    ${cashCategorySummary(data, month)}
     <section class="focus-grid">
       <article class="panel production-focus"><div class="panel-heading"><div><p class="eyebrow">PESANAN CUSTOMER</p><h2>Realisasi kirim</h2><p>Jumlah barang yang dikirim dibanding jumlah yang dipesan.</p></div><span class="focus-icon">${icon('factory', 22)}</span></div>
         <div class="delivery-line"><strong>${integer(perf.delivered)}</strong><span>dari ${integer(perf.ordered)} unit</span></div>

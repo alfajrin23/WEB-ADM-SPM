@@ -109,12 +109,12 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 17px; }
 .metric-card { position: relative; min-height: 145px; padding: 18px 19px; overflow: hidden; border: 1px solid rgba(226, 222, 213, .9); border-radius: 21px 21px 21px 8px; background: var(--paper); box-shadow: 0 8px 24px rgba(48, 54, 55, .035); animation: slide-up .32s var(--ease) both; transition: transform .22s var(--ease), box-shadow .22s var(--ease); }
 .metric-card:nth-child(1), .metric-card:nth-child(2) { min-height: 164px; }
-.metric-card:nth-child(1) { border-top: 3px solid var(--green); background: linear-gradient(145deg, #fffefa 62%, #e8f1e9); }
-.metric-card:nth-child(2) { border-top: 3px solid var(--orange); background: linear-gradient(145deg, #fffefa 62%, #f7ede2); }
-.metric-card:nth-child(3) { border-top: 3px solid var(--blue); }
-.metric-card:nth-child(4) { border-top: 3px solid var(--violet); }
-.metric-card:nth-child(5) { border-top: 3px solid var(--gold); }
-.metric-card:nth-child(6) { border-top: 3px solid var(--red); }
+.metric-card.tone-green { border-top: 3px solid var(--green); background: linear-gradient(145deg, #fffefa 62%, #e8f1e9); }
+.metric-card.tone-orange { border-top: 3px solid var(--orange); background: linear-gradient(145deg, #fffefa 62%, #f7ede2); }
+.metric-card.tone-blue { border-top: 3px solid var(--blue); }
+.metric-card.tone-violet { border-top: 3px solid var(--violet); }
+.metric-card.tone-gold { border-top: 3px solid var(--gold); }
+.metric-card.tone-red { border-top: 3px solid var(--red); }
 .metric-card:hover { transform: translateY(-2px); box-shadow: 0 14px 28px rgba(48, 54, 55, .08); }
 .metric-top { display: flex; align-items: center; justify-content: space-between; color: #6e7b80; font-size: .68rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .metric-icon { display: grid; width: 33px; height: 33px; place-items: center; border-radius: 11px; background: rgba(255, 255, 255, .74); color: var(--green); }
