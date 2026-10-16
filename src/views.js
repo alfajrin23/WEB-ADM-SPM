@@ -60,32 +60,43 @@ function metricCards(data, month) {
   ].join('');
 }
 
-function calendarWeekIndex(day, firstDayOffset) {
-  return Math.floor((day - 1 + firstDayOffset) / 7);
+function calendarWeekRanges(month) {
+  const [year, monthNumber] = String(month || '').split('-').map(Number);
+  if (!year || monthNumber < 1 || monthNumber > 12) return [];
+
+  const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const firstDayOffset = new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay();
+  const weeks = [];
+  let startDay = 1;
+  let endDay = 7 - firstDayOffset;
+  while (startDay <= daysInMonth) {
+    const lastDay = Math.min(endDay, daysInMonth);
+    const number = weeks.length + 1;
+    weeks.push({
+      number,
+      startDay,
+      endDay: lastDay,
+      startDate: `${month}-${String(startDay).padStart(2, '0')}`,
+      endDate: `${month}-${String(lastDay).padStart(2, '0')}`,
+    });
+    startDay = lastDay + 1;
+    endDay += 7;
+  }
+  return weeks;
+}
+
+function calendarWeekIndex(day, weeks) {
+  return weeks.findIndex((week) => day >= week.startDay && day <= week.endDay);
 }
 
 function buildIncomePlan(data, month) {
-  const [year, monthNumber] = String(month || '').split('-').map(Number);
-  const daysInMonth = year && monthNumber ? new Date(year, monthNumber, 0).getDate() : 0;
-  const firstDayOffset = year && monthNumber ? new Date(year, monthNumber - 1, 1).getDay() : 0;
-  const weekCount = Math.ceil((daysInMonth + firstDayOffset) / 7);
+  const calendarWeeks = calendarWeekRanges(month);
+  const weekCount = calendarWeeks.length;
   const plan = {
     month, weekCount, total: 0, invoiceCount: 0,
     missingDue: { amount: 0, count: 0 }, weeks: [],
   };
-  plan.weeks = Array.from({ length: weekCount }, (_, index) => {
-    const startDay = index === 0 ? 1 : index * 7 - firstDayOffset + 1;
-    const endDay = Math.min((index + 1) * 7 - firstDayOffset, daysInMonth);
-    return {
-      number: index + 1,
-      startDay,
-      endDay,
-      startDate: `${month}-${String(startDay).padStart(2, '0')}`,
-      endDate: `${month}-${String(endDay).padStart(2, '0')}`,
-      amount: 0,
-      rows: [],
-    };
-  });
+  plan.weeks = calendarWeeks.map((week) => ({ ...week, amount: 0, rows: [] }));
   const addToWeek = (index, row) => {
     const week = plan.weeks[index];
     if (!week) return;
@@ -116,7 +127,7 @@ function buildIncomePlan(data, month) {
     });
     const dueRows = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date) || a.customer.localeCompare(b.customer, 'id-ID'));
     dueRows.forEach((row) => {
-      const weekIndex = calendarWeekIndex(Number(row.date.slice(8, 10)), firstDayOffset);
+      const weekIndex = calendarWeekIndex(Number(row.date.slice(8, 10)), plan.weeks);
       addToWeek(weekIndex, {
         date: row.date, dateLabel: formatDate(row.date), customer: row.customer,
         note: 'Sesuai tanggal jatuh tempo', count: row.count,
@@ -179,18 +190,17 @@ function incomePlanWeeks(plan, weekIndex, period = 'week') {
   return `<section class="income-week-detail"><div class="income-week-detail-heading"><div><h3>${title}</h3><span>${formatDate(startDate, { day: 'numeric', month: 'short' })}–${formatDate(endDate)}</span></div><strong>${money(amount)}</strong></div>${rows ? `<div class="income-week-rows">${rows}</div>` : `<p class="income-week-empty">${emptyMessage}</p>`}</section>`;
 }
 
-function currentIncomeWeekIndex(month) {
+function currentIncomeWeekIndex(plan, month) {
   const today = new Date();
   const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
   if (month !== currentMonth) return 0;
-  const firstDayOffset = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
-  return calendarWeekIndex(today.getDate(), firstDayOffset);
+  return calendarWeekIndex(today.getDate(), plan.weeks);
 }
 
 function selectedIncomeWeekIndex(plan, month, selectedWeek) {
   if (!plan.weeks.length) return 0;
   const requested = Number(selectedWeek);
-  const fallback = currentIncomeWeekIndex(month);
+  const fallback = currentIncomeWeekIndex(plan, month);
   const index = Number.isInteger(requested) && selectedWeek !== null && selectedWeek !== '' ? requested : fallback;
   return Math.max(0, Math.min(index, plan.weeks.length - 1));
 }
