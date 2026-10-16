@@ -68,18 +68,23 @@ function incomeCustomerRule(customer) {
   return 'due-date';
 }
 
+function calendarWeekIndex(day, firstDayOffset) {
+  return Math.floor((day - 1 + firstDayOffset) / 7);
+}
+
 function buildIncomePlan(data, month) {
   const [year, monthNumber] = String(month || '').split('-').map(Number);
   const daysInMonth = year && monthNumber ? new Date(year, monthNumber, 0).getDate() : 0;
-  const weekCount = Math.ceil(daysInMonth / 7);
+  const firstDayOffset = year && monthNumber ? new Date(year, monthNumber - 1, 1).getDay() : 0;
+  const weekCount = Math.ceil((daysInMonth + firstDayOffset) / 7);
   const plan = {
     month, weekCount, total: 0, invoiceCount: 0,
     akebono: { amount: 0, count: 0 }, eds: { amount: 0, count: 0 }, other: { amount: 0, count: 0 },
     missingDue: { amount: 0, count: 0 }, weeks: [],
   };
   plan.weeks = Array.from({ length: weekCount }, (_, index) => {
-    const startDay = index * 7 + 1;
-    const endDay = Math.min((index + 1) * 7, daysInMonth);
+    const startDay = index === 0 ? 1 : index * 7 - firstDayOffset + 1;
+    const endDay = Math.min((index + 1) * 7 - firstDayOffset, daysInMonth);
     return {
       number: index + 1,
       startDay,
@@ -156,7 +161,7 @@ function buildIncomePlan(data, month) {
   };
   otherRows.forEach((row) => {
     const day = Number(row.date.slice(8, 10));
-    const weekIndex = Math.floor((day - 1) / 7);
+    const weekIndex = calendarWeekIndex(day, firstDayOffset);
     addToWeek(weekIndex, {
       category: 'other',
       dateLabel: formatDate(row.date), customer: row.customer,
@@ -219,7 +224,9 @@ function incomePlanWeeks(plan, weekIndex, period = 'week') {
 function currentIncomeWeekIndex(month) {
   const today = new Date();
   const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  return month === currentMonth ? Math.floor((today.getDate() - 1) / 7) : 0;
+  if (month !== currentMonth) return 0;
+  const firstDayOffset = new Date(today.getFullYear(), today.getMonth(), 1).getDay();
+  return calendarWeekIndex(today.getDate(), firstDayOffset);
 }
 
 function selectedIncomeWeekIndex(plan, month, selectedWeek) {
