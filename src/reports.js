@@ -9,6 +9,7 @@ const unique = (values) => [...new Set(values)];
 const numericCell = (value) => ({ __csvNumeric: true, value: Number(value) || 0 });
 const palette = ['#315f91', '#a6473f', '#37805d', '#9b6d24', '#76529b', '#287c83', '#c25a2a', '#586878', '#a04772', '#698d35'];
 const NEW_SUPPLIER_START = '2026-10-01';
+const NEW_CUSTOMER_RECEIVABLE_START = '2026-10-01';
 
 export function reportCategoryOptions(data) {
   return unique([
@@ -45,6 +46,33 @@ function inPeriod(date, period) {
 
 function invoiceOutstanding(invoice) {
   return Math.max(amountOf(invoice.outstanding_amount ?? (amountOf(invoice.amount) - amountOf(invoice.paid_amount))), 0);
+}
+
+function receivableHistoryStatus(history, period) {
+  if (!history?.available) {
+    return { available: false, complete: false, message: 'Riwayat pembayaran piutang belum tersedia; nominal pembayaran tidak dapat dihitung.' };
+  }
+  const baselineDate = (history.baselines || [])
+    .map((baseline) => String(baseline.captured_at || '').slice(0, 10))
+    .filter(Boolean)
+    .sort()[0];
+  if (!baselineDate) {
+    return { available: false, complete: false, message: 'Baseline riwayat piutang belum tersedia; nominal pembayaran periode belum dapat dipastikan.' };
+  }
+  if (`${period}-01` < baselineDate) {
+    return {
+      available: true,
+      complete: false,
+      baselineDate,
+      message: `Riwayat pembayaran belum lengkap sebelum ${formatDate(baselineDate)}. Nilai hanya menjumlahkan pembayaran yang tercatat pada riwayat.`,
+    };
+  }
+  return {
+    available: true,
+    complete: true,
+    baselineDate,
+    message: `Riwayat pembayaran tersedia sejak ${formatDate(baselineDate)}.`,
+  };
 }
 
 function sum(rows, getter) {
@@ -138,6 +166,25 @@ export function buildReport(data, state) {
   const cashflow = cashflowTotals(periodCashflow);
   const invoices = data.sales_invoices || [];
   const periodInvoices = invoices.filter((row) => inPeriod(row.invoice_date, period));
+  const newReceivableInvoices = invoices.filter((row) => String(row.invoice_date || '').slice(0, 10) >= NEW_CUSTOMER_RECEIVABLE_START);
+  const newReceivableInvoiceIds = new Set(newReceivableInvoices.map((row) => String(row.id)));
+  const receivableHistory = state.reportReceivableHistory || { available: false, baselines: [], events: [] };
+  const receivableStatus = receivableHistoryStatus(receivableHistory, period);
+  const newReceivablePayments = receivableStatus.available
+    ? (receivableHistory.events || [])
+      .filter((event) => event.event_type === 'payment'
+        && inPeriod(event.event_date, period)
+        && newReceivableInvoiceIds.has(String(event.invoice_id)))
+      .map((event) => ({
+        ...event,
+        invoice: invoices.find((invoice) => String(invoice.id) === String(event.invoice_id)),
+        amount: Math.abs(amountOf(event.balance_delta)),
+      }))
+      .filter((event) => event.amount > 0)
+      .sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')) || Number(a.id) - Number(b.id))
+    : [];
+  const newReceivableOutstanding = sum(newReceivableInvoices, invoiceOutstanding);
+  const newReceivablePaymentTotal = sum(newReceivablePayments, (event) => event.amount);
   const dueInvoices = invoices.filter((row) => inPeriod(row.due_date, period) && invoiceOutstanding(row) > 0);
   const nextPeriod = shiftMonth(period, 1);
   const nextDueInvoices = invoices.filter((row) => inPeriod(row.due_date, nextPeriod) && invoiceOutstanding(row) > 0);
@@ -203,6 +250,11 @@ export function buildReport(data, state) {
     invoices: periodInvoices,
     allInvoices: invoices,
     invoiceValue,
+    newReceivableInvoices,
+    newReceivableOutstanding,
+    newReceivablePayments,
+    newReceivablePaymentTotal,
+    receivableStatus,
     dueInvoices,
     duePlan,
     nextPeriod,
@@ -328,6 +380,19 @@ function reportSupplierPanel(report) {
   return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">MENU PIUTANG · KEWAJIBAN PEMASOK</p><h2 id="report-supplier-title">Utang supplier</h2><p>${scopeCaption}</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportBreakdownCard(`Tagihan baru · ${report.periodName}`, rupiah(report.supplierBillsInPeriod), `${integer(report.supplierRows.filter((row) => row.entry_type === 'bill').length)} tagihan tercatat pada bulan ini.`, 'blue')}${reportBreakdownCard(`Pembayaran · ${report.periodName}`, rupiah(report.supplierPayments), `${integer(report.supplierPaymentRows.length)} pembayaran tercatat pada bulan ini.`, 'green')}${reportBreakdownCard('Saldo utang supplier', rupiah(report.supplierOutstanding), `Tagihan sejak 1 Okt dikurangi pembayaran hingga akhir ${report.periodName}.`, 'gold')}</div>${paymentDetails}<p class="report-source-note">Sumber: menu Piutang (supplier_ledger_entries). Saldo mengikuti rekap per pemasok; pembayaran tidak ditautkan ke invoice tertentu. Tabel ini tidak menyimpan tanggal jatuh tempo.</p></section>`;
 }
 
+function reportCustomerReceivablePanel(report) {
+  const paymentRows = report.newReceivablePayments.map((row) => `<tr><td>${esc(row.invoice?.customer || '—')}</td><td>${formatDate(row.invoice?.invoice_date)}</td><td>${esc(row.invoice?.invoice_number || '—')}</td><td>${formatDate(row.event_date)}</td><td class="numeric">${esc(rupiah(row.amount))}</td></tr>`).join('');
+  const paymentDetails = paymentRows
+    ? `<details class="report-history-details"><summary>Rincian pembayaran piutang baru · ${esc(report.periodName)} (${integer(report.newReceivablePayments.length)})</summary><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Tanggal invoice</th><th>No. invoice</th><th>Tanggal bayar</th><th class="numeric">Dibayar</th></tr></thead><tbody>${paymentRows}</tbody></table></div></details>`
+    : `<p class="report-source-note">${report.receivableStatus.available ? `Tidak ada pembayaran tercatat pada ${esc(report.periodName)} untuk invoice baru.` : esc(report.receivableStatus.message)}</p>`;
+  const paymentValue = report.receivableStatus.available ? rupiah(report.newReceivablePaymentTotal) : 'Belum tersedia';
+  const paymentCaption = report.receivableStatus.available
+    ? `${integer(report.newReceivablePayments.length)} pembayaran tercatat untuk invoice terbit mulai 1 Okt 2026.`
+    : 'Riwayat pembayaran belum tersedia.';
+  const statusTone = report.receivableStatus.complete ? 'notice-info' : 'notice-warn';
+  return `<section class="panel report-section" aria-labelledby="report-customer-receivable-title"><div class="panel-heading"><div><p class="eyebrow">MENU TAGIHAN · PIUTANG CUSTOMER</p><h2 id="report-customer-receivable-title">Piutang customer baru</h2><p>Invoice dengan tanggal terbit mulai 1 Okt 2026; pembayaran invoice yang lebih lama dikecualikan.</p></div></div><div class="report-breakdown-grid">${reportBreakdownCard('Total piutang baru saat ini', rupiah(report.newReceivableOutstanding), `${integer(report.newReceivableInvoices.length)} invoice terbit sejak 1 Okt 2026; dihitung dari outstanding saat ini.`, 'blue')}${reportBreakdownCard(`Pembayaran piutang baru · ${report.periodName}`, paymentValue, paymentCaption, 'green')}</div><div class="notice ${statusTone} report-data-status"><span>${esc(report.receivableStatus.message)}</span></div>${paymentDetails}<p class="report-source-note">Pembayaran difilter berdasarkan tanggal bayar pada periode laporan dan invoice_id yang terhubung ke invoice bertanggal mulai 1 Okt 2026. Pembayaran atas invoice sebelum 1 Okt tidak masuk angka atau rincian ini.</p></section>`;
+}
+
 function reportCSV(report, state) {
   const plan = reportPlanView(report, state);
   const rows = [
@@ -337,6 +402,8 @@ function reportCSV(report, state) {
     ['Bagian', 'Metrik', 'Nilai', 'Keterangan'],
     ['Penjualan · invoice', `Jumlah invoice pada periode ${report.periodName}`, numericCell(report.invoices.length), 'Berdasarkan invoice_date.'],
     ['Penjualan · invoice', 'Nilai invoice/tagihan terbit', numericCell(report.invoiceValue), 'Bukan kas yang sudah diterima.'],
+    ['Piutang customer baru', 'Total outstanding saat ini', numericCell(report.newReceivableOutstanding), `${integer(report.newReceivableInvoices.length)} invoice dengan invoice_date mulai 1 Okt 2026.`],
+    ['Piutang customer baru', `Pembayaran tercatat · ${report.periodName}`, report.receivableStatus.available ? numericCell(report.newReceivablePaymentTotal) : '', `${integer(report.newReceivablePayments.length)} event pembayaran untuk invoice mulai 1 Okt 2026. ${report.receivableStatus.message}`],
     ['Rencana uang masuk', `Rencana ${plan.label}`, numericCell(plan.amount), 'Sisa outstanding dari sales_invoices dengan due_date pada rentang tampilan; mengikuti menu Tagihan.'],
     ['Rencana uang masuk', `Rencana bulan penuh · ${report.periodName}`, numericCell(report.duePlan), 'Sisa outstanding invoice dengan due_date pada seluruh bulan laporan.'],
     ['Rencana uang masuk', `Jatuh tempo bulan berikutnya · ${report.nextPeriodName}`, numericCell(report.nextDuePlan), `${integer(report.nextDueInvoices.length)} invoice outstanding berdasarkan due_date bulan berikutnya.`],
@@ -357,6 +424,13 @@ function reportCSV(report, state) {
     rows.push(...report.supplierPaymentRows.map((entry) => [
       'Pembayaran supplier', `${entry.supplier} · ${entry.entry_date}`,
       numericCell(entry.amount), entry.description || '—',
+    ]));
+  }
+  if (report.newReceivablePayments.length) {
+    rows.push(['Piutang customer baru', `Rincian pembayaran · ${report.periodName}`, '', 'Hanya event pembayaran untuk invoice dengan tanggal terbit mulai 1 Okt 2026.']);
+    rows.push(...report.newReceivablePayments.map((event) => [
+      'Pembayaran piutang customer baru', `${event.invoice?.customer || '—'} · ${event.invoice?.invoice_number || '—'} · ${event.event_date}`,
+      numericCell(event.amount), `Invoice terbit ${event.invoice?.invoice_date || '—'}`,
     ]));
   }
   rows.push(['Tren cashflow', 'Periode', 'Kas masuk', 'Kas keluar', 'Arus kas bersih']);
@@ -382,7 +456,10 @@ export function renderReport(data, state) {
     : '';
   const categoryControls = report.categories.map((category) => `<label class="report-category-option"><input type="checkbox" data-report-category value="${esc(category)}" ${report.selectedCategories.includes(category) ? 'checked' : ''}><span>${esc(category)}</span></label>`).join('');
   const plan = reportPlanView(report, state);
-  const executiveSummary = `${integer(report.invoices.length)} invoice customer terbit senilai ${rupiah(report.invoiceValue)} dan ${integer(report.uniqueCustomerPoCount)} PO Customer senilai ${rupiah(report.customerOrderValue)} pada ${report.periodName}.`;
+  const receivableSummary = report.receivableStatus.available
+    ? `Outstanding piutang dari invoice baru saat ini ${rupiah(report.newReceivableOutstanding)}; pembayaran tercatat untuk invoice baru pada ${report.periodName} ${rupiah(report.newReceivablePaymentTotal)}.`
+    : 'Riwayat pembayaran piutang baru belum tersedia.';
+  const executiveSummary = `${integer(report.invoices.length)} invoice customer terbit senilai ${rupiah(report.invoiceValue)} dan ${integer(report.uniqueCustomerPoCount)} PO Customer senilai ${rupiah(report.customerOrderValue)} pada ${report.periodName}. ${receivableSummary}`;
   const metrics = [
     reportMetricCard('Penjualan · invoice', rupiah(report.invoiceValue), 'file', 'violet', `${integer(report.invoices.length)} invoice pada periode ${report.periodName} · nilai tagihan terbit.`),
     reportMetricCard('Rencana penagihan', rupiah(plan.amount), 'clock', 'gold', `${plan.label} · estimasi, bukan kas aktual.`),
@@ -393,6 +470,7 @@ export function renderReport(data, state) {
   ].join('');
   const trendTable = `<details class="report-data-details"><summary>Lihat tabel nilai tren per bulan</summary><div class="table-wrap"><table><thead><tr><th>Periode</th><th class="numeric">Kas masuk</th><th class="numeric">Kas keluar</th><th class="numeric">Arus kas bersih</th></tr></thead><tbody>${report.trend.map((row) => `<tr><th>${esc(monthName(row.month))}</th><td class="numeric">${esc(rupiah(row.cashIn))}</td><td class="numeric">${esc(rupiah(row.cashOut))}</td><td class="numeric">${esc(rupiah(row.net))}</td></tr>`).join('')}</tbody></table></div></details>`;
   const supplierSection = reportSupplierPanel(report);
+  const customerReceivableSection = reportCustomerReceivablePanel(report);
   const cashTrend = renderLineChart(report.trend, report.periodName);
   const expenseChart = renderExpenseChart(report.expenses, report.expenseTotal, report.periodName);
   const cashflowStateNote = report.selectedCategories.length
@@ -403,10 +481,11 @@ export function renderReport(data, state) {
     <section class="page-heading report-heading"><div class="print-brand"><img src="/brand-logo.png" alt=""><span><strong>CV SURYA PRATAMA MANDIRI</strong><small>Laporan perusahaan</small></span></div><div><p class="eyebrow">LAPORAN PERFORMA PERUSAHAAN</p><h1>Laporan</h1><p>Periode ${esc(report.periodName)} · ${esc(cashflowStateNote)}</p></div><div class="heading-actions report-actions"><button class="button secondary" type="button" data-act="export-report">${icon('download', 16)}<span>Ekspor CSV</span></button><button class="button primary" type="button" data-act="print-report">${icon('file', 16)}<span>Cetak / simpan PDF</span></button></div></section>
     <section class="panel report-filters" aria-labelledby="report-filters-title"><div class="report-filter-toggle"><div><p class="eyebrow">FILTER LAPORAN</p><h2 id="report-filters-title">${esc(report.periodName)} · ${integer(report.selectedCategories.length)} kategori dipilih</h2></div><button class="button secondary" type="button" data-act="toggle-report-filters" aria-expanded="${Boolean(state.reportFiltersOpen)}">${icon(state.reportFiltersOpen ? 'close' : 'filter', 16)}<span>${state.reportFiltersOpen ? 'Sembunyikan filter' : 'Tampilkan filter'}</span></button></div>${state.reportFiltersOpen ? `<div class="report-filter-body"><div class="report-filter-top"><p class="report-filter-note">Kategori terpilih memfilter seluruh angka cashflow laporan, termasuk tren, komposisi pengeluaran, dan ekspor. Angka Tagihan, PO Customer, dan utang supplier tidak terpengaruh.</p><label class="month-control report-month"><span>Periode</span><input type="month" data-filter="reportMonth" value="${esc(report.period)}" aria-label="Periode laporan"></label></div><div class="report-category-header"><strong>${integer(report.selectedCategories.length)} dari ${integer(report.categories.length)} kategori dipilih</strong><div><button class="text-button" type="button" data-act="report-select-all">Pilih semua</button><button class="text-button" type="button" data-act="report-reset-categories">Reset</button></div></div><div class="report-category-grid">${categoryControls || '<span class="report-filter-note">Belum ada kategori cashflow.</span>'}</div>${preferenceNotice}</div>` : `<p class="report-filter-selection"><strong>Kategori cashflow:</strong> ${esc(categorySummaryCompact)}</p>`}</section>
     <section class="panel report-section report-summary-panel" aria-labelledby="report-executive-title"><div class="panel-heading"><div><h2 id="report-executive-title">Laporan bulan ${esc(report.periodName)}</h2></div></div><p class="report-executive-summary">${esc(executiveSummary)}</p><div class="metric-grid report-metric-grid">${metrics}</div></section>
+    ${customerReceivableSection}
     ${supplierSection}
     ${reportIncomePlanPanel(report, state, plan)}
     <section class="panel report-section report-trend-panel" data-report-chart aria-labelledby="report-trend-title"><div class="panel-heading"><div><p class="eyebrow">CASHFLOW AKTUAL</p><h2 id="report-trend-title">Tren enam bulan</h2><p>Kategori yang sama diterapkan pada semua bulan; angka pada titik grafik memakai format ringkas.</p></div><button class="button secondary report-fullscreen-button" type="button" data-act="fullscreen-report-chart">${icon('chart', 16)}<span>Layar penuh</span></button></div>${cashTrend}${trendTable}</section>
     <section class="panel report-section" aria-labelledby="report-expenses-title"><div class="panel-heading"><div><p class="eyebrow">CASHFLOW AKTUAL · ${esc(report.periodName)}</p><h2 id="report-expenses-title">Komposisi pengeluaran kas</h2><p>Hanya transaksi kind=debit. Persentase dihitung dari total pengeluaran dengan kategori terpilih.</p></div></div>${expenseChart}</section>
-    <p class="report-source-note report-source-footer">Sumber: cashflow_transactions, sales_invoices, customer_orders, dan supplier_ledger_entries. Baris yang terlihat oleh RLS workspace diambil dengan pagination.</p>
+    <p class="report-source-note report-source-footer">Sumber: cashflow_transactions, sales_invoices, customer_orders, supplier_ledger_entries, customer_receivable_baselines, dan customer_receivable_events. Baris yang terlihat oleh RLS workspace diambil dengan pagination.</p>
   </main>`;
 }
