@@ -503,8 +503,8 @@ function supplierPoItem(item, index) {
     actual: toNumber(item.qtyKirim) * toNumber(item.harga),
   };
   return `<section class="po-item-row" data-po-item><div class="po-item-top"><strong>Item ${index + 1}</strong><button type="button" class="icon-button danger-icon" aria-label="Hapus item" title="Hapus item" data-act="remove-po-item">${icon('trash', 15)}</button></div>
-    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty kirim</span><input name="item-shipped" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyKirim || 0)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc data-money-input data-min="0" data-step="0.01" inputmode="decimal" autocomplete="off" type="text" value="${esc(formatNumberInput(item.harga))}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
-    <div class="po-item-calc"><span>Kurang kirim <b data-calc-short>${new Intl.NumberFormat('id-ID').format(calc.kurang)}</b></span><span>Nilai terkirim <b data-calc-value>${rupiah(calc.actual)}</b></span></div></section>`;
+    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order dari supplier</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty kirim ke customer</span><input name="item-shipped" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyKirim || 0)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc data-money-input data-min="0" data-step="0.01" inputmode="decimal" autocomplete="off" type="text" value="${esc(formatNumberInput(item.harga))}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
+    <div class="po-item-calc"><span>Stock tersedia <b data-calc-short>${new Intl.NumberFormat('id-ID').format(calc.kurang)}</b></span><span>Nilai terkirim ke customer <b data-calc-value>${rupiah(calc.actual)}</b></span></div></section>`;
 }
 
 function confirmDelete(table, id) {
@@ -642,27 +642,27 @@ function exportData(kind) {
       .sort((a, b) => (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
     const items = orders.flatMap((order) => (order.items || []).map((item) => {
       const ordered = Number(item.qtyOrder) || 0; const shipped = Number(item.qtyKirim) || 0; const price = Number(item.harga) || 0;
-      const shortage = Math.max(ordered - shipped, 0); const openValue = shortage * price; const shippedValue = shipped * price;
-      return { order, item, ordered, shipped, price, shortage, openValue, openTax: openValue * .11, shippedValue, shippedTax: shippedValue * .11, payable: shippedValue * 1.11 };
+      const stock = Math.max(ordered - shipped, 0); const stockValue = stock * price; const shippedValue = shipped * price;
+      return { order, item, ordered, shipped, price, stock, stockValue, stockTax: stockValue * .11, shippedValue, shippedTax: shippedValue * .11, shippedTotal: shippedValue * 1.11 };
     }));
     const totals = items.reduce((sum, row) => {
-      for (const key of ['ordered', 'shipped', 'shortage', 'openValue', 'openTax', 'shippedValue', 'shippedTax', 'payable']) sum[key] += row[key];
+      for (const key of ['ordered', 'shipped', 'stock', 'stockValue', 'stockTax', 'shippedValue', 'shippedTax', 'shippedTotal']) sum[key] += row[key];
       return sum;
-    }, { ordered: 0, shipped: 0, shortage: 0, openValue: 0, openTax: 0, shippedValue: 0, shippedTax: 0, payable: 0 });
-    const details = items.map(({ order, item, ordered, shipped, price, shortage, openValue, openTax, shippedValue, shippedTax, payable }) => [
+    }, { ordered: 0, shipped: 0, stock: 0, stockValue: 0, stockTax: 0, shippedValue: 0, shippedTax: 0, shippedTotal: 0 });
+    const details = items.map(({ order, item, ordered, shipped, price, stock, stockValue, stockTax, shippedValue, shippedTax, shippedTotal }) => [
       csvDate(order.order_date), order.po_number || '—', order.supplier || '—', order.customer || '—', item.item || 'SHEET',
-      item.qlty || '—', item.sizeSheet || '—', csvQuantity(ordered), csvQuantity(shortage), csvMoney(price), csvMoney(openValue),
-      csvMoney(openTax), csvQuantity(shipped), csvMoney(shippedValue), csvMoney(shippedTax), csvMoney(payable),
+      item.qlty || '—', item.sizeSheet || '—', csvQuantity(ordered), csvQuantity(stock), csvMoney(price), csvMoney(stockValue),
+      csvMoney(stockTax), csvQuantity(shipped), csvMoney(shippedValue), csvMoney(shippedTax), csvMoney(shippedTotal),
     ]);
-    downloadReport(`spm-po-supplier-${state.month}.csv`, 'PO supplier dan penerimaan bahan', period, [
+    downloadReport(`spm-po-supplier-${state.month}.csv`, 'Rekap stock bahan PO supplier', period, [
       ['Jumlah PO', csvQuantity(new Set(orders.map((order) => order.po_number).filter(Boolean)).size)],
       ['Jumlah supplier', csvQuantity(new Set(orders.map((order) => String(order.supplier || '').trim().toLocaleLowerCase('id-ID')).filter(Boolean)).size)],
-      ['Jumlah baris item', csvQuantity(items.length)], ['Total qty dipesan', csvQuantity(totals.ordered)],
-      ['Total qty diterima', csvQuantity(totals.shipped)], ['Total qty kurang diterima', csvQuantity(totals.shortage)],
-      ['Nilai sisa sebelum PPN (Rp)', csvMoney(totals.openValue)], ['PPN atas nilai sisa (Rp)', csvMoney(totals.openTax)],
-      ['Total nilai diterima termasuk PPN (Rp)', csvMoney(totals.payable)],
-    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty dipesan', 'Kurang diterima', 'Harga/unit (Rp)', 'Nilai sisa (Rp)', 'PPN sisa (Rp)', 'Qty diterima', 'Nilai diterima (Rp)', 'PPN diterima (Rp)', 'Total diterima + PPN (Rp)'], details,
-    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.shortage), '', csvMoney(totals.openValue), csvMoney(totals.openTax), csvQuantity(totals.shipped), csvMoney(totals.shippedValue), csvMoney(totals.shippedTax), csvMoney(totals.payable)]);
+      ['Jumlah baris item', csvQuantity(items.length)], ['Total qty dipesan dari supplier', csvQuantity(totals.ordered)],
+      ['Total qty terkirim ke customer', csvQuantity(totals.shipped)], ['Total stock tersedia', csvQuantity(totals.stock)],
+      ['Nilai stock sebelum PPN (Rp)', csvMoney(totals.stockValue)], ['PPN stock (Rp)', csvMoney(totals.stockTax)],
+      ['Total nilai stock termasuk PPN (Rp)', csvMoney(totals.stockTotal)],
+    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order dari supplier', 'Stock tersedia', 'Harga/unit (Rp)', 'Nilai stock (Rp)', 'PPN stock (Rp)', 'Qty kirim ke customer', 'Nilai terkirim (Rp)', 'PPN terkirim (Rp)', 'Total terkirim + PPN (Rp)'], details,
+    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.stock), '', csvMoney(totals.stockValue), csvMoney(totals.stockTax), csvQuantity(totals.shipped), csvMoney(totals.shippedValue), csvMoney(totals.shippedTax), csvMoney(totals.shippedTotal)]);
   } else if (kind === 'supplier-ledger') {
     const all = state.data.supplier_ledger_entries;
     const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
@@ -869,6 +869,7 @@ async function saveModal(form) {
     const order = state.data.supplier_purchase_orders.find((item) => item.id === values.po_id);
     if (!order) throw new Error('PO supplier tidak ditemukan.');
     const items = [...(order.items || [])];
+    items[Number(values.item_index)].qtyOrder = num('qtyOrder');
     items[Number(values.item_index)].qtyKirim = num('qtyKirim');
     return saveRow('supplier_purchase_orders', { items }, order.id);
   }
@@ -1106,7 +1107,7 @@ async function handleClick(event) {
     const order = state.data.supplier_purchase_orders.find((row) => row.id === button.dataset.id);
     const item = order?.items?.[Number(button.dataset.index)];
     if (!order || !item) return;
-    openModal({ title: `Update qty kirim · ${order.po_number}`, action: 'save-shipped', submit: 'Simpan qty kirim', body: `<input type="hidden" name="po_id" value="${order.id}"><input type="hidden" name="item_index" value="${button.dataset.index}"><div class="form-grid">${inputField('Jumlah dipesan', 'qtyOrder', item.qtyOrder, 'number', { min: 0, step: '0.01' })}${inputField('Jumlah terkirim', 'qtyKirim', item.qtyKirim || 0, 'number', { min: 0, step: '0.01', required: true })}</div><p class="form-hint">Kekurangan dan nilai kirim dihitung ulang saat disimpan.</p>` });
+    openModal({ title: `Update qty kirim ke customer · ${order.po_number}`, action: 'save-shipped', submit: 'Simpan qty kirim', body: `<input type="hidden" name="po_id" value="${order.id}"><input type="hidden" name="item_index" value="${button.dataset.index}"><div class="form-grid">${inputField('Qty order dari supplier', 'qtyOrder', item.qtyOrder, 'number', { min: 0, step: '0.01' })}${inputField('Qty kirim ke customer', 'qtyKirim', item.qtyKirim || 0, 'number', { min: 0, step: '0.01', required: true })}</div><p class="form-hint">Stock tersedia dihitung dari Qty order dikurangi Qty kirim ke customer.</p>` });
     return;
   }
   if (action === 'add-po-item') {
