@@ -257,7 +257,7 @@ function cashCategoryCards(data, month) {
     const key = category.toLocaleLowerCase('id-ID');
     if (key.includes('gaji')) return 'users';
     if (key.includes('material') || key.includes('subcon')) return 'package';
-    if (key.includes('uang masuk')) return 'wallet';
+    if (key.includes('uang masuk') || key.includes('dana talang')) return 'wallet';
     if (key.includes('listrik')) return 'factory';
     return 'file';
   };

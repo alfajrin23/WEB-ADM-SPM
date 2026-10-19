@@ -1,5 +1,5 @@
 export const CASH_CATEGORIES = [
-  'Admin', 'Gaji Staff', 'Gaji Produksi', 'Operasional', 'Uang Masuk', 'Listrik',
+  'Admin', 'Gaji Staff', 'Gaji Produksi', 'Operasional', 'Uang Masuk', 'Dana Talang', 'Listrik',
   'Subcon', 'ATK', 'Pajak', 'Telephone', 'Material Bahan', 'Fee Market',
   'Cicilan', 'Perawatan', 'Sewa Gudang', 'Lainnya',
 ];

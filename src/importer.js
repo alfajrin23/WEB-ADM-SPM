@@ -209,6 +209,7 @@ function parseInvoices(rows, headerIndex, rowOffset, file, sheetName) {
 function categoryName(raw) {
   const value = clean(raw);
   const key = value.toLocaleLowerCase('id-ID');
+  if (key.includes('dana talang')) return 'Dana Talang';
   if (key === 'uang masuk' || key.includes('transfer masuk')) return 'Uang Masuk';
   if (key.includes('admin')) return 'Admin';
   if (key.includes('gaji') && key.includes('produksi')) return 'Gaji Produksi';

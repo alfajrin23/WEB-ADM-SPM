@@ -317,11 +317,11 @@ function openModal(modal) {
 
 function cashflowModal(row = {}) {
   const category = row.category || CASH_CATEGORIES[0];
-  const kind = category === 'Uang Masuk' ? 'credit' : (row.kind || 'debit');
+  const kind = ['Uang Masuk', 'Dana Talang'].includes(category) ? 'credit' : (row.kind || 'debit');
   openModal({
     title: row.id ? 'Edit transaksi kas' : 'Transaksi kas baru', action: 'save-cashflow', submit: row.id ? 'Simpan perubahan' : 'Simpan transaksi',
     attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true })}${inputField('Nama pengajuan', 'requester', row.requester || '', 'text', { placeholder: 'Nama pemohon' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01', money: true })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk menambah saldo. Kategori lain dicatat sebagai debit.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true })}${inputField('Nama pengajuan', 'requester', row.requester || '', 'text', { placeholder: 'Nama pemohon' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, step: '0.01', money: true })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk dan Dana Talang menambah saldo; kategori lain dicatat sebagai debit.</p>`,
   });
 }
 
@@ -676,7 +676,7 @@ async function saveModal(form) {
     const category = values.category;
     const result = await saveRow('cashflow_transactions', {
       transaction_date: values.transaction_date, category, requester: values.requester.trim(), description: values.description.trim(),
-      amount: num('amount'), kind: category === 'Uang Masuk' ? 'credit' : 'debit',
+      amount: num('amount'), kind: ['Uang Masuk', 'Dana Talang'].includes(category) ? 'credit' : 'debit',
     }, id);
     return result;
   }
