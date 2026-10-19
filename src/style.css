@@ -608,6 +608,55 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
   .loading-grid { grid-template-columns: repeat(2, 1fr); }
   .skeleton-card { height: 120px; }
 }
+
+/* Laporan mengikuti susunan dashboard: ringkasan kartu, grafik, lalu rincian opsional. */
+.report-summary-panel .report-executive-summary { max-width: 1100px; padding-left: 13px; border-left: 3px solid #d8e3e5; }
+.metric-grid.report-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin: 16px 0; }
+.report-metric-grid .report-metric-card,
+.report-metric-grid .report-metric-card:nth-child(1),
+.report-metric-grid .report-metric-card:nth-child(2) { min-height: 135px; padding: 16px 17px; }
+.report-metric-card > strong { margin-top: 12px; font-size: clamp(1rem, 1.6vw, 1.48rem); }
+.report-metric-card > small { max-width: 34ch; line-height: 1.45; }
+.report-breakdown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
+.report-breakdown-card { display: grid; min-width: 0; align-content: start; gap: 7px; padding: 13px 14px; border: 1px solid #ebe7dd; border-top: 3px solid var(--blue); border-radius: 15px 15px 15px 6px; background: #fffefa; }
+.report-breakdown-card.tone-green { border-top-color: var(--green); }
+.report-breakdown-card.tone-violet { border-top-color: var(--violet); }
+.report-breakdown-card.tone-gold { border-top-color: var(--gold); }
+.report-breakdown-card.tone-red { border-top-color: var(--red); }
+.report-breakdown-card > span { color: #78858b; font-size: .67rem; font-weight: 800; line-height: 1.35; }
+.report-breakdown-card > strong { color: var(--ink); font: 700 clamp(.85rem, 1.1vw, 1rem)/1.25 'DM Mono', monospace; overflow-wrap: anywhere; }
+.report-breakdown-card > small { color: #879399; font-size: .64rem; line-height: 1.45; }
+.report-receivable-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.report-supplier-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.report-formula-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; padding: 11px 13px; border-radius: 13px; background: #f3f2ec; color: #6e7b80; font-size: .7rem; }
+.report-formula-note strong { color: var(--ink); }
+.report-formula-note span { color: #31414b; font: 600 .72rem 'DM Mono', monospace; text-align: right; }
+.report-data-details { margin-top: 12px; padding-top: 10px; border-top: 1px solid #eeeae1; }
+.report-data-details summary { color: var(--navy); cursor: pointer; font-size: .73rem; font-weight: 800; }
+.report-data-details .table-wrap { margin-top: 10px; }
+.report-donut-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; }
+.report-expense-tile { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 5px 8px; min-width: 0; padding: 9px 10px; border: 1px solid #ebe7dd; border-radius: 12px; background: #fffefa; color: #40505b; font-size: .71rem; }
+.report-expense-tile > i { grid-row: span 2; width: 10px; height: 10px; border-radius: 50%; background: var(--legend-color); }
+.report-expense-tile > span { overflow-wrap: anywhere; }
+.report-expense-tile > strong { color: var(--ink); font: 700 .69rem 'DM Mono', monospace; text-align: right; }
+.report-expense-tile > small { grid-column: 2 / 4; color: #78858b; font-size: .64rem; }
+
+@media (max-width: 900px) {
+  .report-receivable-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .report-supplier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .metric-grid.report-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-receivable-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-donut-legend { grid-template-columns: 1fr; }
+  .report-formula-note { align-items: flex-start; flex-direction: column; }
+  .report-formula-note span { text-align: left; }
+}
+@media (max-width: 390px) {
+  .metric-grid.report-metric-grid,
+  .report-receivable-grid,
+  .report-supplier-grid { grid-template-columns: 1fr; }
+}
 @media print {
   @page { size: landscape; margin: 12mm; }
   body { background: white; color: #111; }
