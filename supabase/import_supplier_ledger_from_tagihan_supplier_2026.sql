@@ -1,12 +1,11 @@
 -- Import TAGIHAN SUPPLIER 2026.xlsx into the Piutang pemasok menu.
 -- Run in Supabase SQL Editor after the main workspace schema is installed.
 -- 20261019_customer_receivable_history.sql only creates customer receivable history tables; it does not import supplier ledger rows.
--- Idempotent: rows with these source_key values are skipped on rerun; no existing operational records are updated or deleted.
--- Workbook detail rows: 53 dated invoice rows are inserted as 52 bills (the identical INDOCORR invoice/date rows 22 and 23 are combined by sum); 1 dated supplier payment is inserted.
--- 2 ADINA invoices are excluded because their TGL INV cells are blank. Their amounts are disclosed below.
--- The ledger has no due_date column; dates are retained in the entry description when present.
--- Excluded: ADINA Excel row 6; invoice 2503-FP-00702; amount 20073813.00; TGL INV missing, no date was invented.
--- Excluded: ADINA Excel row 9; invoice 2505-FP-00745; amount 21859510.00; TGL INV missing, no date was invented.
+-- Idempotent: source_key conflicts are skipped on rerun; existing operational rows are not updated or deleted.
+-- Workbook detail: 55 invoice rows are inserted as 54 bills (INDOCORR Excel rows 23 and 24 share an invoice/date and are combined by sum); 1 dated payment is inserted.
+-- The dates for two blank ADINA TGL INV cells were supplied by the user: 2025-03-22 and 2025-05-26.
+-- The supplier ledger has no due_date column; due dates are retained in descriptions when present.
+
 begin;
 do $$
 declare
@@ -31,8 +30,10 @@ begin
       (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-03-08', 'bill', 39254235.00, 'Invoice 2503-FP-00146; Jatuh tempo 2025-04-07', 'tagihan-supplier-2026::ADINA::rows-3::bill'),
       (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-03-18', 'bill', 32959897.00, 'Invoice 2504-FP-00413; Jatuh tempo 2025-04-17', 'tagihan-supplier-2026::ADINA::rows-4::bill'),
       (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-03-22', 'bill', 28204760.00, 'Invoice 2503-FP-00654; Jatuh tempo 2025-04-21', 'tagihan-supplier-2026::ADINA::rows-5::bill'),
+      (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-03-22', 'bill', 20073813.00, 'Invoice 2503-FP-00702; Tanggal invoice dikonfirmasi pengguna', 'tagihan-supplier-2026::ADINA::rows-6::bill'),
       (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-04-26', 'bill', 39992167.00, 'Invoice 2504-FP-00618; Jatuh tempo 2025-05-26', 'tagihan-supplier-2026::ADINA::rows-7::bill'),
       (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-05-26', 'bill', 29157628.00, 'Invoice 2505-FP-00696; Jatuh tempo 2025-06-25', 'tagihan-supplier-2026::ADINA::rows-8::bill'),
+      (v_owner, v_workspace, 'PT. ADINA MULTI WAHANA', DATE '2025-05-26', 'bill', 21859510.00, 'Invoice 2505-FP-00745; Tanggal invoice dikonfirmasi pengguna', 'tagihan-supplier-2026::ADINA::rows-9::bill'),
       (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-10', 'bill', 8919400.00, 'Invoice 254594/SCI/VII/2024; Jatuh tempo 2024-08-09', 'tagihan-supplier-2026::INDOCORR::rows-3::bill'),
       (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-10', 'bill', 10902420.00, 'Invoice 254576/SCI/VII/2024; Jatuh tempo 2024-08-09', 'tagihan-supplier-2026::INDOCORR::rows-4::bill'),
       (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-18', 'bill', 7584141.00, 'Invoice 254784/SCI/VII/2024; Jatuh tempo 2024-08-17', 'tagihan-supplier-2026::INDOCORR::rows-5::bill'),
@@ -52,7 +53,7 @@ begin
       (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-30', 'bill', 8485665.00, 'Invoice 255187/SCI/VII/2024; Jatuh tempo 2024-08-29', 'tagihan-supplier-2026::INDOCORR::rows-19::bill'),
       (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-30', 'bill', 6408185.00, 'Invoice 255188/SCI/VII/2024; Jatuh tempo 2024-08-29', 'tagihan-supplier-2026::INDOCORR::rows-20::bill'),
       (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-30', 'bill', 7715843.00, 'Invoice 255223/SCI/VII/2024; Jatuh tempo 2024-08-29', 'tagihan-supplier-2026::INDOCORR::rows-21::bill'),
-      (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-30', 'bill', 25852842.00, 'Invoice 255289/SCI/VII/2024; Jatuh tempo 2024-08-29; Baris Excel 22 + 23 digabung', 'tagihan-supplier-2026::INDOCORR::rows-22-23::bill'),
+      (v_owner, v_workspace, 'PT. INDOCORR', DATE '2024-07-30', 'bill', 25852842.00, 'Invoice 255289/SCI/VII/2024; Jatuh tempo 2024-08-29; Baris Excel 23 + 24 digabung', 'tagihan-supplier-2026::INDOCORR::rows-22-23::bill'),
       (v_owner, v_workspace, 'CV. MINNA PAPER', DATE '2026-09-18', 'bill', 31911751.00, 'Invoice 2026-09/MPI/0514; Jatuh tempo 2026-10-18', 'tagihan-supplier-2026::CV MINNA::rows-3::bill'),
       (v_owner, v_workspace, 'SETIAJAYA', DATE '2025-03-27', 'bill', 33668520.00, 'Invoice 254594/SCI/VII/2024; Jatuh tempo 2025-04-26', 'tagihan-supplier-2026::SETIAJAYA::rows-3::bill'),
       (v_owner, v_workspace, 'TRYUASDA', DATE '2025-10-01', 'bill', 4417800.00, 'Invoice INV.09.2025.866; Jatuh tempo 2025-10-31', 'tagihan-supplier-2026::TRYUASDA::rows-3::bill'),
