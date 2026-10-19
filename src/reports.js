@@ -335,8 +335,8 @@ function reportCSV(report, state) {
     ['Kategori cashflow terpilih', report.selectedCategories.length ? report.selectedCategories.join(', ') : 'Tidak ada kategori'],
     ['Definisi cashflow', 'Hanya cashflow_transactions berdasarkan transaction_date dan kind; kategori terpilih sama untuk semua angka cashflow.'],
     ['Bagian', 'Metrik', 'Nilai', 'Keterangan'],
-    ['Invoice customer', `Jumlah invoice pada periode ${report.periodName}`, numericCell(report.invoices.length), 'Berdasarkan invoice_date.'],
-    ['Invoice customer', 'Nilai invoice/tagihan terbit', numericCell(report.invoiceValue), 'Bukan kas yang sudah diterima.'],
+    ['Penjualan · invoice', `Jumlah invoice pada periode ${report.periodName}`, numericCell(report.invoices.length), 'Berdasarkan invoice_date.'],
+    ['Penjualan · invoice', 'Nilai invoice/tagihan terbit', numericCell(report.invoiceValue), 'Bukan kas yang sudah diterima.'],
     ['Rencana uang masuk', `Rencana ${plan.label}`, numericCell(plan.amount), 'Sisa outstanding dari sales_invoices dengan due_date pada rentang tampilan; mengikuti menu Tagihan.'],
     ['Rencana uang masuk', `Rencana bulan penuh · ${report.periodName}`, numericCell(report.duePlan), 'Sisa outstanding invoice dengan due_date pada seluruh bulan laporan.'],
     ['Rencana uang masuk', `Jatuh tempo bulan berikutnya · ${report.nextPeriodName}`, numericCell(report.nextDuePlan), `${integer(report.nextDueInvoices.length)} invoice outstanding berdasarkan due_date bulan berikutnya.`],
@@ -384,7 +384,7 @@ export function renderReport(data, state) {
   const plan = reportPlanView(report, state);
   const executiveSummary = `${integer(report.invoices.length)} invoice customer terbit senilai ${rupiah(report.invoiceValue)} dan ${integer(report.uniqueCustomerPoCount)} PO Customer senilai ${rupiah(report.customerOrderValue)} pada ${report.periodName}.`;
   const metrics = [
-    reportMetricCard('Invoice customer', rupiah(report.invoiceValue), 'file', 'violet', `${integer(report.invoices.length)} invoice pada periode ${report.periodName} · nilai tagihan terbit.`),
+    reportMetricCard('Penjualan · invoice', rupiah(report.invoiceValue), 'file', 'violet', `${integer(report.invoices.length)} invoice pada periode ${report.periodName} · nilai tagihan terbit.`),
     reportMetricCard('Rencana penagihan', rupiah(plan.amount), 'clock', 'gold', `${plan.label} · estimasi, bukan kas aktual.`),
     reportMetricCard('PO Customer', rupiah(report.customerOrderValue), 'package', 'blue', `${integer(report.uniqueCustomerPoCount)} PO unik · ${integer(report.customerOrders.length)} baris item.`),
     reportMetricCard('Kas masuk', rupiah(report.cashflow.cashIn), 'wallet', 'green', 'Cashflow aktual · transaksi kind credit.'),

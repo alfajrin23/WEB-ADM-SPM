@@ -11,7 +11,7 @@ let activeWorkspaceId = null;
 const workspaceColumns = {
   company_settings: 'opening_balance, opening_balance_date',
   cashflow_transactions: 'id, transaction_date, category, requester, description, amount, kind',
-  supplier_ledger_entries: 'id, supplier, entry_date, entry_type, amount, description, created_at',
+  supplier_ledger_entries: 'id, supplier, entry_date, entry_type, amount, description, linked_bill_id, created_at',
   sales_invoices: 'id, invoice_date, due_date, paid_date, customer, invoice_number, po_number, amount, paid_amount, outstanding_amount',
   customer_receivable_baselines: 'workspace_id, captured_at, opening_balance',
   customer_receivable_events: 'id, workspace_id, invoice_id, event_date, event_type, balance_delta, created_at',

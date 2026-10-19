@@ -352,29 +352,100 @@ function invoicePaymentDateModal(invoice) {
   });
 }
 
+function normalizeSupplierName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+}
+
+function supplierBalanceFor(entries, supplier, excludeId = '') {
+  const key = normalizeSupplierName(supplier);
+  return entries
+    .filter((row) => row.id !== excludeId && normalizeSupplierName(row.supplier) === key)
+    .reduce((balance, row) => balance + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0);
+}
+
+function linkedBillBalanceFor(entries, billId, excludeId = '') {
+  const bill = entries.find((row) => row.id === billId && row.entry_type === 'bill');
+  if (!bill) return null;
+  const linkedPaid = entries
+    .filter((row) => row.id !== excludeId && row.entry_type === 'payment' && row.linked_bill_id === billId)
+    .reduce((total, row) => total + Number(row.amount || 0), 0);
+  return Math.max(Number(bill.amount || 0) - linkedPaid, 0);
+}
+
 function supplierEntryModal(type, supplier = '', row = {}) {
   const payment = type === 'payment';
-  const normalizedSupplier = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
-  const supplierBalance = payment
-    ? state.data.supplier_ledger_entries
-      .filter((entry) => normalizedSupplier(entry.supplier) === normalizedSupplier(supplier) && entry.id !== row.id)
-      .reduce((total, row) => total + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0)
-    : 0;
+  const entries = state.data.supplier_ledger_entries;
+  const supplierBalance = payment ? supplierBalanceFor(entries, supplier, row.id || '') : 0;
   if (payment && supplierBalance <= 0) {
-    toast('Supplier ini tidak memiliki sisa piutang untuk dibayar.', 'info');
+    toast('Supplier ini tidak memiliki sisa tagihan untuk dibayar.', 'info');
     return;
   }
-  const supplierNames = [...new Set(state.data.supplier_ledger_entries.map((row) => String(row.supplier || '').trim()).filter(Boolean))]
+  const selectedBillId = row.linked_bill_id || '';
+  const supplierBills = payment
+    ? entries.filter((entry) => entry.entry_type === 'bill' && normalizeSupplierName(entry.supplier) === normalizeSupplierName(supplier))
+      .map((bill) => {
+        const remaining = linkedBillBalanceFor(entries, bill.id, row.id || '');
+        return { ...bill, remaining, paymentLimit: Math.min(Math.max(supplierBalance, 0), remaining || 0) };
+      })
+      .filter((bill) => bill.paymentLimit > 0 || bill.id === selectedBillId)
+      .sort((a, b) => (b.entry_date || '').localeCompare(a.entry_date || '') || (b.created_at || '').localeCompare(a.created_at || ''))
+    : [];
+  if (payment && !supplierBills.length) {
+    toast('Tidak ada tagihan supplier yang dapat dipilih untuk pembayaran ini.', 'info');
+    return;
+  }
+  const selectedBill = supplierBills.find((bill) => bill.id === selectedBillId);
+  const initialLimit = payment ? (selectedBill?.paymentLimit ?? Math.max(supplierBalance, 0)) : undefined;
+  const unlinkedPaymentCount = payment
+    ? entries.filter((entry) => entry.entry_type === 'payment' && !entry.linked_bill_id && normalizeSupplierName(entry.supplier) === normalizeSupplierName(supplier)).length
+    : 0;
+  const supplierNames = [...new Set(entries.map((entry) => String(entry.supplier || '').trim()).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, 'id'));
   const supplierField = payment
     ? `<label class="field field-wide"><span>Nama supplier</span><input value="${esc(supplier)}" disabled><input type="hidden" name="supplier" value="${esc(supplier)}"></label>`
     : `${inputField('Nama supplier', 'supplier', row.supplier || '', 'text', { required: true, placeholder: 'Nama supplier', attrs: 'list="supplier-ledger-vendors"' })}<datalist id="supplier-ledger-vendors">${supplierNames.map((name) => `<option value="${esc(name)}"></option>`).join('')}</datalist>`;
+  const billField = payment
+    ? `<label class="field field-wide"><span>Pilih tagihan yang dibayar</span><select name="linked_bill_id" data-supplier-bill-select ${!row.id || selectedBillId ? 'required' : ''}><option value="" ${selectedBillId ? '' : 'selected'}>Pilih tanggal, keterangan, dan nominal tagihan</option>${supplierBills.map((bill) => {
+      const description = bill.description || 'Tanpa keterangan';
+      return `<option value="${esc(bill.id)}" ${bill.id === selectedBillId ? 'selected' : ''} data-payment-limit="${bill.paymentLimit}" data-bill-date="${esc(formatDate(bill.entry_date))}" data-bill-description="${esc(description)}" data-bill-amount="${esc(rupiah(bill.amount))}" data-bill-remaining="${esc(rupiah(bill.remaining))}">${esc(formatDate(bill.entry_date))} · ${esc(description)} · ${esc(rupiah(bill.amount))} · sisa tertaut ${esc(rupiah(bill.remaining))}</option>`;
+    }).join('')}</select></label>`
+    : '';
+  const paymentPreview = payment
+    ? `<p class="supplier-payment-preview" data-supplier-bill-preview>${selectedBill ? `Tagihan dipilih: ${formatDate(selectedBill.entry_date)} · ${selectedBill.description || 'Tanpa keterangan'} · ${rupiah(selectedBill.amount)}. Sisa berdasarkan pembayaran tertaut: ${rupiah(selectedBill.remaining)}.` : 'Pilih tagihan berdasarkan tanggal, keterangan, dan nilai tagihan.'}</p>`
+    : '';
+  const legacyPaymentNotice = unlinkedPaymentCount
+    ? `<p class="form-hint">Ada ${unlinkedPaymentCount} pembayaran supplier yang belum ditautkan ke tagihan tertentu. Pembayaran tersebut tidak dialokasikan otomatis.</p>`
+    : '';
+  const paymentLimitNote = payment
+    ? `<p class="form-hint" data-supplier-payment-limit>Maksimum pembayaran saat ini ${rupiah(initialLimit)}; sisa seluruh tagihan supplier ${rupiah(Math.max(supplierBalance, 0))}.</p>${legacyPaymentNotice}`
+    : '';
+  const formAttrs = [row.id ? `data-id="${esc(row.id)}"` : '', payment ? `data-supplier-balance="${Math.max(supplierBalance, 0)}"` : ''].filter(Boolean).join(' ');
+  const dateField = inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', row.entry_date || isoToday(), 'date', { required: true });
+  const amountField = inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, max: payment ? initialLimit : undefined, step: '0.01', money: true });
+  const paymentFields = payment ? `${amountField}${dateField}` : `${dateField}${amountField}`;
   openModal({
     title: row.id ? (payment ? 'Edit pembayaran supplier' : 'Edit tagihan supplier') : payment ? `Pembayaran supplier · ${supplier}` : 'Tagihan baru',
     action: 'save-supplier-entry', submit: row.id ? 'Simpan perubahan' : payment ? 'Simpan pembayaran' : 'Simpan tagihan',
-    attrs: row.id ? `data-id="${esc(row.id)}"` : '',
-    body: `<div class="form-grid">${supplierField}${inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', row.entry_date || isoToday(), 'date', { required: true })}${inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, max: payment ? supplierBalance : undefined, step: '0.01', money: true })}${inputField('Keterangan (opsional)', 'description', row.description || '', 'text', { placeholder: payment ? 'Pembayaran sebagian / pelunasan' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${payment ? `<p class="form-hint">Sisa piutang supplier ini ${rupiah(supplierBalance)}. Pembayaran tidak boleh melebihi sisa tersebut.</p>` : ''}`,
+    attrs: formAttrs,
+    body: `<div class="form-grid">${supplierField}${billField}${paymentPreview}${paymentFields}${inputField(payment ? 'Keterangan pembayaran (opsional)' : 'Keterangan (opsional)', 'description', row.description || '', 'text', { placeholder: payment ? 'Misalnya pembayaran sebagian' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${paymentLimitNote}`,
   });
+}
+
+function updateSupplierPaymentSelection(select) {
+  const form = select.closest('form');
+  if (!form) return;
+  const option = select.selectedOptions[0];
+  const limit = option?.value ? Number(option.dataset.paymentLimit) : Number(form.dataset.supplierBalance || 0);
+  const amount = form.elements.namedItem('amount');
+  if (amount) amount.dataset.max = String(Math.max(limit || 0, 0));
+  const preview = form.querySelector('[data-supplier-bill-preview]');
+  if (preview) {
+    preview.textContent = option?.value
+      ? `Tagihan dipilih: ${option.dataset.billDate} · ${option.dataset.billDescription} · ${option.dataset.billAmount}. Sisa berdasarkan pembayaran tertaut: ${option.dataset.billRemaining}.`
+      : 'Pilih tagihan berdasarkan tanggal, keterangan, dan nilai tagihan.';
+  }
+  const note = form.querySelector('[data-supplier-payment-limit]');
+  if (note) note.textContent = `Maksimum pembayaran saat ini ${rupiah(Math.max(limit || 0, 0))}; sisa seluruh tagihan supplier ${rupiah(Number(form.dataset.supplierBalance || 0))}.`;
 }
 
 function customerOrderModal(row = {}) {
@@ -595,6 +666,7 @@ function exportData(kind) {
   } else if (kind === 'supplier-ledger') {
     const all = state.data.supplier_ledger_entries;
     const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+    const billsById = new Map(all.filter((row) => row.entry_type === 'bill').map((row) => [row.id, row]));
     const chronological = [...all].sort((a, b) => supplierKey(a.supplier).localeCompare(supplierKey(b.supplier), 'id-ID')
       || (a.entry_date || '').localeCompare(b.entry_date || '') || (a.created_at || '').localeCompare(b.created_at || '') || String(a.id || '').localeCompare(String(b.id || '')));
     const balances = new Map(); const balanceAfterEntry = new Map();
@@ -607,18 +679,24 @@ function exportData(kind) {
     const payments = rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const currentBalances = [...balances.values()].map((value) => Math.max(value, 0));
     const currentOutstanding = currentBalances.reduce((sum, value) => sum + value, 0);
-    const details = rows.map((row) => [
-      csvDate(row.entry_date), row.supplier, row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran',
-      row.entry_type === 'bill' ? csvMoney(row.amount) : '', row.entry_type === 'payment' ? csvMoney(row.amount) : '',
-      csvMoney(Math.max(balanceAfterEntry.get(row.id) || 0, 0)), row.description || '—',
-    ]);
+    const details = rows.map((row) => {
+      const linkedBill = row.linked_bill_id ? billsById.get(row.linked_bill_id) : null;
+      const linkedBillLabel = linkedBill
+        ? `${csvDate(linkedBill.entry_date)} · ${linkedBill.description || 'Tanpa keterangan'} · ${csvMoney(linkedBill.amount)}`
+        : row.entry_type === 'payment' ? 'Belum ditautkan ke tagihan tertentu' : '';
+      return [
+        csvDate(row.entry_date), row.supplier, row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran',
+        row.entry_type === 'bill' ? csvMoney(row.amount) : '', row.entry_type === 'payment' ? csvMoney(row.amount) : '',
+        csvMoney(Math.max(balanceAfterEntry.get(row.id) || 0, 0)), linkedBillLabel, row.description || '—',
+      ];
+    });
     downloadReport(`spm-piutang-pemasok-${state.month}.csv`, 'Tagihan dan pembayaran supplier', period, [
       ['Jumlah transaksi periode', csvQuantity(rows.length)], ['Total tagihan periode (Rp)', csvMoney(bills)],
       ['Total pembayaran periode (Rp)', csvMoney(payments)], ['Perubahan saldo periode (Rp)', csvMoney(bills - payments)],
       ['Sisa piutang seluruh supplier saat ekspor (Rp)', csvMoney(currentOutstanding)],
       ['Supplier dengan piutang aktif saat ekspor', csvQuantity(currentBalances.filter((value) => value > 0).length)],
-    ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Keterangan'], details,
-    ['TOTAL PERIODE', '', '', csvMoney(bills), csvMoney(payments), '', '']);
+    ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Tagihan yang dibayar', 'Keterangan'], details,
+    ['TOTAL PERIODE', '', '', csvMoney(bills), csvMoney(payments), '', '', '']);
   } else if (kind === 'events') {
     const rows = state.data.production_events.filter((row) => row.event_date?.startsWith(state.month))
       .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '') || String(a.id || '').localeCompare(String(b.id || '')));
@@ -698,18 +776,27 @@ async function saveModal(form) {
     if (!supplier) throw new Error('Nama supplier wajib diisi.');
     if (!values.entry_date) throw new Error('Tanggal transaksi wajib diisi.');
     if (!Number.isFinite(amount) || amount <= 0) throw new Error('Nominal harus lebih besar dari Rp 0.');
+    const linkedBillId = String(values.linked_bill_id || '').trim() || null;
     if (values.entry_type === 'payment') {
-      const key = supplier.toLocaleLowerCase('id-ID');
-      const balance = state.data.supplier_ledger_entries
-        .filter((row) => row.id !== id && String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === key)
-        .reduce((total, row) => total + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0);
-      if (amount > balance) throw new Error(`Nominal bayar melebihi sisa piutang ${rupiah(Math.max(balance, 0))}.`);
+      if (!id && !linkedBillId) throw new Error('Pilih tagihan supplier yang akan dibayar.');
+      const balance = supplierBalanceFor(state.data.supplier_ledger_entries, supplier, id);
+      if (amount > balance) throw new Error(`Nominal bayar melebihi sisa seluruh tagihan supplier ${rupiah(Math.max(balance, 0))}.`);
+      if (linkedBillId) {
+        const linkedBill = state.data.supplier_ledger_entries.find((row) => row.id === linkedBillId && row.entry_type === 'bill');
+        if (!linkedBill || normalizeSupplierName(linkedBill.supplier) !== normalizeSupplierName(supplier)) {
+          throw new Error('Tagihan yang dipilih tidak cocok dengan supplier ini.');
+        }
+        const billBalance = linkedBillBalanceFor(state.data.supplier_ledger_entries, linkedBillId, id);
+        if (billBalance === null || amount > billBalance) {
+          throw new Error(`Nominal bayar melebihi sisa tagihan terpilih ${rupiah(Math.max(billBalance || 0, 0))}.`);
+        }
+      }
     }
-    const normalizedSupplier = supplier.toLocaleLowerCase('id-ID');
-    const existingSupplier = state.data.supplier_ledger_entries.find((row) => String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID') === normalizedSupplier)?.supplier;
+    const normalizedSupplier = normalizeSupplierName(supplier);
+    const existingSupplier = state.data.supplier_ledger_entries.find((row) => normalizeSupplierName(row.supplier) === normalizedSupplier)?.supplier;
     const saved = await saveRow('supplier_ledger_entries', {
       supplier, entry_date: values.entry_date, entry_type: values.entry_type,
-      amount, description: values.description.trim(),
+      amount, description: values.description.trim(), linked_bill_id: values.entry_type === 'payment' ? linkedBillId : null,
     }, id);
     state.expandedSuppliers.add(String(existingSupplier || supplier).trim().replace(/\s+/g, ' '));
     state.expandedSuppliers.add(supplier);
@@ -1095,6 +1182,7 @@ function handleInput(event) {
 
 async function handleChange(event) {
   const target = event.target;
+  if (target.matches('[data-supplier-bill-select]')) { updateSupplierPaymentSelection(target); return; }
   if (target.matches('[data-filter="reportMonth"]')) {
     state.reportMonth = /^\d{4}-\d{2}$/.test(target.value) ? target.value : localISODate(new Date()).slice(0, 7);
     state.reportIncomeWeek = null;

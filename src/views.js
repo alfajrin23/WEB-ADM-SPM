@@ -413,7 +413,8 @@ function supplierReceivables(data) {
       || String(a.id || '').localeCompare(String(b.id || '')));
     const billed = rows.filter((row) => row.entry_type === 'bill').reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const paid = rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    return { name: group.name, rows, billed, paid, balance: Math.max(billed - paid, 0) };
+    const billsById = new Map(rows.filter((row) => row.entry_type === 'bill').map((row) => [row.id, row]));
+    return { name: group.name, rows, billsById, billed, paid, balance: Math.max(billed - paid, 0) };
   });
 }
 
@@ -429,7 +430,11 @@ function payables(data, state) {
       const billAmount = row.entry_type === 'bill' ? money(row.amount) : '—';
       const paymentAmount = row.entry_type === 'payment' ? money(row.amount) : '—';
       const description = row.description || (row.entry_type === 'bill' ? 'Tagihan baru' : 'Pembayaran');
-      return `<tr><td>${formatDate(row.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td><td>${esc(description)}</td><td class="numeric">${billAmount}</td><td class="numeric">${paymentAmount}</td><td class="numeric">${money(Math.max(balance, 0))}</td><td class="row-actions">${smallButton('Edit tagihan atau pembayaran', 'edit', `data-table="supplier_ledger_entries" data-id="${row.id}"`)}${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+      const linkedBill = row.entry_type === 'payment' && row.linked_bill_id ? supplier.billsById.get(row.linked_bill_id) : null;
+      const linkedLabel = linkedBill
+        ? `<small class="supplier-payment-link">Untuk tagihan ${formatDate(linkedBill.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${esc(linkedBill.description || 'Tanpa keterangan')} · ${money(linkedBill.amount)}</small>`
+        : row.entry_type === 'payment' ? '<small class="supplier-payment-link supplier-payment-unlinked">Pembayaran belum ditautkan ke tagihan tertentu.</small>' : '';
+      return `<tr><td>${formatDate(row.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td><td><span>${esc(description)}</span>${linkedLabel}</td><td class="numeric">${billAmount}</td><td class="numeric">${paymentAmount}</td><td class="numeric">${money(Math.max(balance, 0))}</td><td class="row-actions">${smallButton('Edit tagihan atau pembayaran', 'edit', `data-table="supplier_ledger_entries" data-id="${row.id}"`)}${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
     }).join('');
     const paymentAction = supplier.balance > 0
       ? actionButton('Bayar', 'new-supplier-payment', `data-supplier="${esc(supplier.name)}"`, 'wallet', 'secondary')
