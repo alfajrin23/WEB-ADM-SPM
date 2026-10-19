@@ -626,8 +626,7 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .report-breakdown-card > span { color: #78858b; font-size: .67rem; font-weight: 800; line-height: 1.35; }
 .report-breakdown-card > strong { color: var(--ink); font: 700 clamp(.85rem, 1.1vw, 1rem)/1.25 'DM Mono', monospace; overflow-wrap: anywhere; }
 .report-breakdown-card > small { color: #879399; font-size: .64rem; line-height: 1.45; }
-.report-receivable-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.report-supplier-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.report-supplier-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .report-formula-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; padding: 11px 13px; border-radius: 13px; background: #f3f2ec; color: #6e7b80; font-size: .7rem; }
 .report-formula-note strong { color: var(--ink); }
 .report-formula-note span { color: #31414b; font: 600 .72rem 'DM Mono', monospace; text-align: right; }
@@ -642,19 +641,16 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .report-expense-tile > small { grid-column: 2 / 4; color: #78858b; font-size: .64rem; }
 
 @media (max-width: 900px) {
-  .report-receivable-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .report-supplier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .metric-grid.report-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .report-receivable-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .report-donut-legend { grid-template-columns: 1fr; }
   .report-formula-note { align-items: flex-start; flex-direction: column; }
   .report-formula-note span { text-align: left; }
 }
 @media (max-width: 390px) {
   .metric-grid.report-metric-grid,
-  .report-receivable-grid,
   .report-supplier-grid { grid-template-columns: 1fr; }
 }
 @media print {
