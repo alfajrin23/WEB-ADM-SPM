@@ -3,6 +3,7 @@ import {
   inMonth, monthName, orderProgress, rupiah, statusForInvoice,
 } from './helpers.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
+import { renderReport } from './reports.js';
 
 const money = (value) => rupiah(value);
 const smallButton = (label, action, attrs = '', glyph = 'edit', extra = '') =>
@@ -637,6 +638,7 @@ export function renderPage(tab, data, state) {
     'po-customer': () => customerOrders(data, state),
     produksi: () => production(data, state),
     supplier: () => supplierOrders(data, state),
+    laporan: () => renderReport(data, state),
     kalkulator: () => calculator(state),
     impor: () => imports(state),
     'logs-input': () => inputLogs(state),
@@ -649,6 +651,7 @@ export const pageTabs = [
   ['piutang', 'Piutang', 'users'], ['tagihan', 'Tagihan', 'file'],
   ['produksi', 'Produksi', 'factory'], ['po-customer', 'PO Customer', 'package'],
   ['supplier', 'PO Supplier', 'package'],
+  ['laporan', 'Laporan', 'file'],
   ['kalkulator', 'Kalkulator', 'calculator'], ['impor', 'Impor data', 'upload'],
   ['logs-input', 'Log Input', 'file'],
 ];

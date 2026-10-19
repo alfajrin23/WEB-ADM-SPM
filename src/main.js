@@ -1,5 +1,5 @@
 import {
-  supabase, isConfigured, loadProfile, loadWorkspace, loadInputLogs, loadWorkspaceUsers,
+  supabase, isConfigured, loadProfile, loadWorkspace, loadReceivableHistory, loadInputLogs, loadWorkspaceUsers,
   setWorkspaceId, setWorkspaceUserRole, saveRow, deleteRow, upsertRows,
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
@@ -8,6 +8,7 @@ import {
   monthName, orderProgress, rupiah, statusForInvoice, toNumber,
 } from './helpers.js';
 import { pageTabs, renderPage, renderSignIn } from './views.js';
+import { downloadReportCsv, reportCategoryOptions } from './reports.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
 import './style.css';
 
@@ -21,6 +22,7 @@ const tablesByTab = {
   piutang: ['supplier_ledger_entries'],
   tagihan: ['sales_invoices'],
   'po-customer': ['customer_orders'],
+  laporan: ['cashflow_transactions', 'sales_invoices', 'supplier_ledger_entries', 'customer_orders'],
   produksi: ['customer_orders', 'production_events'],
   supplier: ['supplier_purchase_orders'],
   kalkulator: [],
@@ -55,6 +57,13 @@ const state = {
   profiles: [],
   profilesLoaded: false,
   month: localISODate(new Date()).slice(0, 7),
+  reportMonth: localISODate(new Date()).slice(0, 7),
+  reportCategories: null,
+  reportCategoryKnownCategories: [],
+  reportCategoryStorageKey: '',
+  reportCategoryPreferenceError: false,
+  reportReceivableHistory: null,
+  reportReceivableHistoryLoadedAt: 0,
   incomeWeek: null,
   incomePlanPeriod: 'week',
   category: '',
@@ -77,6 +86,49 @@ const app = document.querySelector('#app');
 let authHydration = 0;
 let activeDataLoads = 0;
 let dataLoadGeneration = 0;
+
+function persistReportCategoryPreferences() {
+  if (!state.reportCategoryStorageKey || !state.reportCategories) return;
+  try {
+    localStorage.setItem(state.reportCategoryStorageKey, JSON.stringify({
+      categories: state.reportCategoryKnownCategories,
+      selected: state.reportCategories,
+    }));
+    state.reportCategoryPreferenceError = false;
+  } catch {
+    state.reportCategoryPreferenceError = true;
+  }
+}
+
+function syncReportCategoryPreferences() {
+  const userId = state.session?.user?.id;
+  const workspaceId = state.profile?.workspace_id;
+  if (!userId || !workspaceId) return;
+  const key = `spm-report-categories:${userId}:${workspaceId}`;
+  const options = reportCategoryOptions(state.data);
+  if (state.reportCategoryStorageKey !== key) {
+    let saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      state.reportCategoryPreferenceError = true;
+    }
+    const known = Array.isArray(saved?.categories) ? saved.categories : [];
+    state.reportCategoryStorageKey = key;
+    state.reportCategoryKnownCategories = [...new Set([...known, ...(Array.isArray(saved?.selected) ? saved.selected : []), ...options])];
+    state.reportCategories = Array.isArray(saved?.selected)
+      ? [...new Set([...saved.selected, ...options.filter((category) => !known.includes(category))])]
+      : [...options];
+    persistReportCategoryPreferences();
+    return;
+  }
+  const newCategories = options.filter((category) => !state.reportCategoryKnownCategories.includes(category));
+  if (newCategories.length) {
+    state.reportCategoryKnownCategories = [...state.reportCategoryKnownCategories, ...newCategories];
+    state.reportCategories = [...new Set([...(state.reportCategories || []), ...newCategories])];
+    persistReportCategoryPreferences();
+  }
+}
 
 function toast(message, type = 'success') {
   clearTimeout(state.toastTimer);
@@ -121,6 +173,7 @@ function render() {
   const displayName = state.session.user?.email || 'Akun SPM';
   const visibleTabs = pageTabs.filter(([key]) => key !== 'logs-input' || state.profile.role === 'developer');
   if (!visibleTabs.some(([key]) => key === state.tab)) state.tab = state.profile.role === 'staff' ? 'produksi' : 'dashboard';
+  if (state.tab === 'laporan') syncReportCategoryPreferences();
   const tabs = visibleTabs.map(([key, label, glyph]) => `<button class="nav-tab ${state.tab === key ? 'active' : ''}" type="button" data-act="navigate" data-tab="${key}">${icon(glyph, 17)}<span>${esc(label)}</span></button>`).join('');
   app.innerHTML = `<div class="app-shell">
     <header class="topbar"><a class="brand" href="#" data-act="navigate" data-tab="dashboard"><img src="/brand-logo.png" alt="Logo CV Surya Pratama Mandiri"/><span><strong>CV Surya Pratama Mandiri</strong><small>${state.profile.role === 'developer' ? 'Developer' : 'Staff'} · Ruang kerja operasional</small></span></a>
@@ -128,7 +181,7 @@ function render() {
       <nav class="main-nav" aria-label="Menu utama">${tabs}</nav>
       <div class="account-menu"><span class="account-dot"></span><span class="account-email">${esc(displayName)}</span><button type="button" class="icon-button" aria-label="Keluar" title="Keluar" data-act="signout">${icon('logout', 17)}</button></div>
     </header>
-    <main class="workspace"><div class="workspace-tools"><div><span class="live-dot"></span><span>Data tersimpan di Supabase</span></div>${['tagihan', 'produksi', 'po-customer', 'supplier'].includes(state.tab) ? '' : `<label class="month-control"><span>Periode</span><input aria-label="Pilih periode" data-filter="month" type="month" value="${esc(state.month)}"></label>`}</div>
+    <main class="workspace"><div class="workspace-tools"><div><span class="live-dot"></span><span>Data tersimpan di Supabase</span></div>${['tagihan', 'produksi', 'po-customer', 'supplier', 'laporan'].includes(state.tab) ? '' : `<label class="month-control"><span>Periode</span><input aria-label="Pilih periode" data-filter="month" type="month" value="${esc(state.month)}"></label>`}</div>
       ${state.loadError ? `<div class="notice notice-warn setup-notice">${icon('alert', 18)}<span>${esc(state.loadError)}</span></div>` : ''}
       ${state.loading ? `<div class="loading-grid">${Array.from({ length: 6 }, () => '<div class="skeleton-card"></div>').join('')}</div>` : renderPage(state.tab, state.data, state)}
       <footer class="app-footer"><span>CV Surya Pratama Mandiri</span><span>Keuangan · PO · Produksi</span></footer>
@@ -178,7 +231,9 @@ async function refreshData({
   const requestedLogMonth = state.month;
   const shouldLoadLogs = isDeveloper && (forceLogs || state.inputLogsMonth !== requestedLogMonth || Date.now() - state.inputLogsLoadedAt > 60_000);
   const shouldLoadProfiles = isDeveloper && (forceProfiles || !state.profilesLoaded);
-  if (!tablesToLoad.length && !shouldLoadLogs && !shouldLoadProfiles) {
+  const shouldLoadReceivableHistory = state.tab === 'laporan'
+    && Date.now() - state.reportReceivableHistoryLoadedAt > 60_000;
+  if (!tablesToLoad.length && !shouldLoadLogs && !shouldLoadProfiles && !shouldLoadReceivableHistory) {
     if (showLoading) render();
     return;
   }
@@ -192,10 +247,11 @@ async function refreshData({
     render();
   }
   try {
-    const [workspace, logs, profiles] = await Promise.all([
+    const [workspace, logs, profiles, receivableHistory] = await Promise.all([
       tablesToLoad.length ? loadWorkspace(tablesToLoad) : Promise.resolve(null),
       shouldLoadLogs ? loadInputLogs(requestedLogMonth) : Promise.resolve(null),
       shouldLoadProfiles ? loadWorkspaceUsers() : Promise.resolve(null),
+      shouldLoadReceivableHistory ? loadReceivableHistory() : Promise.resolve(null),
     ]);
     if (state.session?.user?.id !== userId) return;
     if (workspace) {
@@ -213,6 +269,10 @@ async function refreshData({
     if (profiles) {
       state.profiles = profiles;
       state.profilesLoaded = true;
+    }
+    if (receivableHistory) {
+      state.reportReceivableHistory = receivableHistory;
+      state.reportReceivableHistoryLoadedAt = Date.now();
     }
   } catch (error) {
     if (state.session?.user?.id === userId) state.loadError = friendlyError(error);
@@ -280,10 +340,11 @@ function invoiceModal(row = {}) {
 }
 
 function invoicePaymentDateModal(invoice) {
+  const balance = Number(invoice.outstanding_amount ?? Math.max(Number(invoice.amount) - Number(invoice.paid_amount || 0), 0));
   openModal({
-    title: 'Catat tanggal pelunasan', action: 'mark-invoice-paid', submit: 'Simpan pelunasan',
+    title: 'Catat pembayaran invoice', action: 'mark-invoice-paid', submit: 'Simpan pembayaran',
     attrs: `data-id="${esc(invoice.id)}"`,
-    body: `<p class="confirm-copy">Masukkan tanggal pelunasan untuk invoice <strong>${esc(invoice.invoice_number || '')}</strong>.</p><div class="form-grid">${inputField('Tanggal pelunasan', 'paid_date', invoice.paid_date || isoToday(), 'date', { required: true, full: true })}</div>`,
+    body: `<p class="confirm-copy">Catat pembayaran untuk invoice <strong>${esc(invoice.invoice_number || '')}</strong>. Sisa tercatat ${rupiah(balance)}.</p><div class="form-grid">${inputField('Jumlah pembayaran', 'payment_amount', balance, 'number', { required: true, min: 0.01, step: '0.01', money: true })}${inputField('Tanggal pembayaran', 'paid_date', isoToday(), 'date', { required: true })}</div><p class="form-hint">Pembayaran dapat dicatat sebagian. Setiap perubahan jumlah dan tanggal tersimpan pada riwayat piutang setelah migration dijalankan.</p>`,
   });
 }
 
@@ -651,6 +712,10 @@ async function saveModal(form) {
   if (action === 'save-invoice') {
     const amount = num('amount');
     const paidAmount = Math.min(num('paid_amount'), amount);
+    const existingInvoice = id ? state.data.sales_invoices.find((row) => row.id === id) : null;
+    if (paidAmount > Number(existingInvoice?.paid_amount || 0) && !values.paid_date) {
+      throw new Error('Tanggal pembayaran wajib diisi saat menambah jumlah yang sudah dibayar.');
+    }
     if (amount > 0 && paidAmount >= amount && !values.paid_date) {
       throw new Error('Tanggal pelunasan wajib diisi untuk invoice yang sudah lunas.');
     }
@@ -664,8 +729,14 @@ async function saveModal(form) {
     const invoice = state.data.sales_invoices.find((row) => row.id === id);
     if (!invoice) throw new Error('Invoice tidak ditemukan. Muat ulang halaman lalu coba lagi.');
     if (!values.paid_date) throw new Error('Tanggal pelunasan wajib diisi.');
+    const paymentAmount = num('payment_amount');
+    const outstanding = Number(invoice.outstanding_amount ?? Math.max(Number(invoice.amount) - Number(invoice.paid_amount || 0), 0));
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) throw new Error('Jumlah pembayaran harus lebih besar dari Rp 0.');
+    if (paymentAmount > outstanding || Number(invoice.paid_amount || 0) + paymentAmount > Number(invoice.amount)) {
+      throw new Error(`Pembayaran melebihi sisa invoice ${rupiah(Math.max(outstanding, 0))}.`);
+    }
     return saveRow('sales_invoices', {
-      paid_date: values.paid_date, paid_amount: Number(invoice.amount), outstanding_amount: 0,
+      paid_date: values.paid_date, paid_amount: Number(invoice.paid_amount || 0) + paymentAmount, outstanding_amount: null,
     }, id);
   }
   if (action === 'save-customer-order') {
@@ -730,6 +801,7 @@ async function runImport() {
   const tablesToRefresh = [preview.type];
   const conflict = preview.type === 'supplier_purchase_orders' ? 'workspace_id,po_number' : 'workspace_id,source_key';
   await upsertRows(preview.type, preview.records, conflict);
+  if (preview.type === 'sales_invoices') state.reportReceivableHistoryLoadedAt = 0;
   if (preview.type === 'cashflow_transactions' && preview.openingBalance != null) {
     const { error } = await supabase.from('company_settings').upsert({
       owner_id: state.session.user.id, workspace_id: state.profile.workspace_id,
@@ -844,6 +916,20 @@ async function handleClick(event) {
     void refreshData({ forceLogs: state.tab === 'logs-input', forceProfiles: state.tab === 'logs-input' });
     return;
   }
+  if (action === 'report-select-all') {
+    syncReportCategoryPreferences();
+    state.reportCategories = [...state.reportCategoryKnownCategories];
+    persistReportCategoryPreferences();
+    render(); return;
+  }
+  if (action === 'report-reset-categories') {
+    syncReportCategoryPreferences();
+    state.reportCategories = [];
+    persistReportCategoryPreferences();
+    render(); return;
+  }
+  if (action === 'print-report') { window.print(); return; }
+  if (action === 'export-report') { downloadReportCsv(state.data, state); return; }
   if (action === 'select-month') { state.month = button.dataset.month; render(); return; }
   if (action === 'change-year') {
     const [year, month] = state.month.split('-').map(Number);
@@ -885,7 +971,7 @@ async function handleClick(event) {
       const updated = await saveRow('sales_invoices', {
         paid_date: null, paid_amount: 0, outstanding_amount: invoice.amount,
       }, invoice.id);
-      updateLocalRow('sales_invoices', updated); render();
+      updateLocalRow('sales_invoices', updated); state.reportReceivableHistoryLoadedAt = 0; render();
       toast('Invoice ditandai belum lunas.');
     } catch (error) { toast(friendlyError(error), 'error'); }
     return;
@@ -986,6 +1072,17 @@ function handleInput(event) {
 
 async function handleChange(event) {
   const target = event.target;
+  if (target.matches('[data-filter="reportMonth"]')) {
+    state.reportMonth = /^\d{4}-\d{2}$/.test(target.value) ? target.value : localISODate(new Date()).slice(0, 7);
+    render(); return;
+  }
+  if (target.matches('[data-report-category]')) {
+    const selected = new Set(state.reportCategories || []);
+    target.checked ? selected.add(target.value) : selected.delete(target.value);
+    state.reportCategories = [...selected];
+    persistReportCategoryPreferences();
+    render(); return;
+  }
   if (target.matches('[data-filter="month"]')) {
     state.month = target.value;
     if (state.tab === 'logs-input') {
@@ -1060,6 +1157,9 @@ async function handleSubmit(event) {
     const action = form.dataset.action;
     if (result?.deleted) removeLocalRow(result.table, result.id);
     else if (tableByAction[action] && result) updateLocalRow(tableByAction[action], result);
+    if (['save-invoice', 'mark-invoice-paid'].includes(action) || (result?.deleted && result.table === 'sales_invoices')) {
+      state.reportReceivableHistoryLoadedAt = 0;
+    }
     state.modal = null;
     state.pendingDelete = null;
     state.inputLogsMonth = '';
@@ -1097,6 +1197,11 @@ async function activateSession(session) {
     state.inputLogsLoadedAt = 0;
     state.profiles = [];
     state.profilesLoaded = false;
+    state.reportReceivableHistory = null;
+    state.reportReceivableHistoryLoadedAt = 0;
+    state.reportCategoryStorageKey = '';
+    state.reportCategories = null;
+    state.reportCategoryKnownCategories = [];
   }
   const requestId = ++authHydration;
   state.session = session;
