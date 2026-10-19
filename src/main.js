@@ -64,6 +64,9 @@ const state = {
   reportCategoryPreferenceError: false,
   reportReceivableHistory: null,
   reportReceivableHistoryLoadedAt: 0,
+  reportFiltersOpen: false,
+  reportIncomeWeek: null,
+  reportIncomePlanPeriod: 'week',
   incomeWeek: null,
   incomePlanPeriod: 'week',
   category: '',
@@ -72,6 +75,7 @@ const state = {
   modal: null,
   pendingDelete: null,
   expandedSuppliers: new Set(),
+  expandedSupplierCustomers: new Set(),
   importFile: null,
   importPreview: null,
   calculator: { substance: '3', spec: 'BC/F', panjang: '18', lebar: '18', tinggi: '28.5', diskon: '3', margin: '40', showPricelist: false },
@@ -415,7 +419,9 @@ function supplierOrderModal(row = {}) {
 
 function supplierPoForm(draft) {
   const itemRows = draft.items.map((item, index) => supplierPoItem(item, index)).join('');
-  return `<div class="form-grid">${inputField('Tanggal PO', 'order_date', draft.order_date, 'date', { required: true })}${inputField('Nomor PO', 'po_number', draft.po_number, 'text', { required: true })}${inputField('Pemasok', 'supplier', draft.supplier, 'text', { required: true })}${inputField('Customer', 'customer', draft.customer, 'text')}</div>
+  const suppliers = [...new Set(state.data.supplier_purchase_orders.map((row) => String(row.supplier || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'id-ID'));
+  const supplierField = `<label class="field"><span>Pemasok</span><input name="supplier" value="${esc(draft.supplier)}" list="supplier-po-suggestions" autocomplete="off" required><small>Pilih nama yang pernah dipakai atau ketik pemasok baru, termasuk nama perorangan, CV, atau PT.</small><datalist id="supplier-po-suggestions">${suppliers.map((supplier) => `<option value="${esc(supplier)}"></option>`).join('')}</datalist></label>`;
+  return `<div class="form-grid">${inputField('Tanggal PO', 'order_date', draft.order_date, 'date', { required: true })}${inputField('Nomor PO', 'po_number', draft.po_number, 'text', { required: true })}${supplierField}${inputField('Customer', 'customer', draft.customer, 'text')}</div>
     <div class="po-item-heading"><div><p class="eyebrow">RINCIAN</p><h3>Item bahan</h3></div><button type="button" class="button secondary" data-act="add-po-item">${icon('plus', 16)}<span>Tambah item</span></button></div>
     <div class="po-item-list">${itemRows}</div>`;
 }
@@ -916,6 +922,23 @@ async function handleClick(event) {
     void refreshData({ forceLogs: state.tab === 'logs-input', forceProfiles: state.tab === 'logs-input' });
     return;
   }
+  if (action === 'toggle-report-filters') { state.reportFiltersOpen = !state.reportFiltersOpen; render(); return; }
+  if (action === 'toggle-customer-stock') {
+    const customer = button.dataset.customer || '';
+    state.expandedSupplierCustomers.has(customer)
+      ? state.expandedSupplierCustomers.delete(customer)
+      : state.expandedSupplierCustomers.add(customer);
+    render(); return;
+  }
+  if (action === 'fullscreen-report-chart') {
+    const chart = document.querySelector('[data-report-chart]');
+    try {
+      if (document.fullscreenElement === chart) await document.exitFullscreen();
+      else if (chart?.requestFullscreen) await chart.requestFullscreen();
+      else throw new Error('Mode layar penuh tidak didukung browser ini.');
+    } catch (error) { toast(friendlyError(error), 'error'); }
+    return;
+  }
   if (action === 'report-select-all') {
     syncReportCategoryPreferences();
     state.reportCategories = [...state.reportCategoryKnownCategories];
@@ -1074,6 +1097,15 @@ async function handleChange(event) {
   const target = event.target;
   if (target.matches('[data-filter="reportMonth"]')) {
     state.reportMonth = /^\d{4}-\d{2}$/.test(target.value) ? target.value : localISODate(new Date()).slice(0, 7);
+    state.reportIncomeWeek = null;
+    render(); return;
+  }
+  if (target.matches('[data-filter="reportIncomeWeek"]')) {
+    if (target.value === 'month') state.reportIncomePlanPeriod = 'month';
+    else {
+      state.reportIncomePlanPeriod = 'week';
+      state.reportIncomeWeek = Number(target.value);
+    }
     render(); return;
   }
   if (target.matches('[data-report-category]')) {

@@ -720,3 +720,66 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
   }
   .main-nav::-webkit-scrollbar { display: block; width: 4px; }
 }
+
+.report-filter-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.report-filter-toggle h2 { margin: 0; color: var(--ink); font: 800 1rem/1.3 Manrope, sans-serif; }
+.report-filter-toggle .eyebrow { margin-bottom: 4px; }
+.report-filter-selection { margin: 10px 0 0; color: #687780; font-size: .72rem; line-height: 1.5; overflow-wrap: anywhere; }
+.report-filter-body { margin-top: 14px; padding-top: 13px; border-top: 1px solid #eeeae1; }
+.report-filter-body .report-filter-top { align-items: center; }
+.report-filter-body .report-filter-note { max-width: 700px; }
+.report-plan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 13px; }
+.report-plan-metrics .metric-card,
+.report-plan-metrics .metric-card:nth-child(1),
+.report-plan-metrics .metric-card:nth-child(2) { min-height: 126px; }
+.report-due-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 9px; }
+.report-due-card { display: grid; gap: 7px; min-width: 0; padding: 12px 13px; border: 1px solid #ebe7dd; border-radius: 14px 14px 14px 6px; background: #fffefa; }
+.report-due-card > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.report-due-card strong { color: var(--ink); font-size: .76rem; line-height: 1.35; }
+.report-due-card b { color: #28664c; font: 700 .75rem 'DM Mono', monospace; text-align: right; overflow-wrap: anywhere; }
+.report-due-card small { color: #839097; font-size: .65rem; line-height: 1.45; overflow-wrap: anywhere; }
+.report-trend-panel:fullscreen { width: 100vw; height: 100vh; max-width: none; margin: 0; padding: 24px; overflow: auto; border: 0; border-radius: 0; background: var(--paper); }
+.report-trend-panel:fullscreen .report-line-chart { width: 100%; min-width: 0; max-height: none; height: min(72vh, 820px); }
+.report-trend-panel:fullscreen .report-chart-scroll { overflow: visible; }
+.report-point-label { fill: var(--point-color); font: 800 10px 'DM Sans', sans-serif; stroke: var(--paper); stroke-width: 3.5px; stroke-linejoin: round; paint-order: stroke; pointer-events: none; }
+.report-fullscreen-button { flex: 0 0 auto; white-space: nowrap; }
+.stock-customer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.stock-customer-card { min-width: 0; padding: 16px; border: 1px solid #e4e0d7; border-radius: 19px 19px 19px 7px; background: rgba(255, 254, 250, .95); box-shadow: 0 7px 20px rgba(48, 54, 55, .03); }
+.stock-customer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 13px; border-bottom: 1px solid #eeeae1; }
+.stock-customer-head .eyebrow { margin-bottom: 3px; }
+.stock-customer-head h3 { margin: 0 0 4px; color: var(--ink); font: 800 1rem Manrope, sans-serif; }
+.stock-customer-head small { color: #829098; font-size: .65rem; }
+.stock-received-total { display: grid; gap: 4px; text-align: right; }
+.stock-received-total small { color: #78858b; font-size: .63rem; }
+.stock-received-total strong { color: #245e45; font: 700 .86rem 'DM Mono', monospace; }
+.stock-material-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; margin-top: 12px; }
+.stock-material-card { display: grid; gap: 5px; min-width: 0; padding: 10px 11px; border: 1px solid #ebe7dd; border-radius: 12px; background: #f8f7f1; }
+.stock-material-card > span { color: #586873; font-size: .68rem; font-weight: 700; overflow-wrap: anywhere; }
+.stock-material-card > strong { color: var(--ink); font: 700 .8rem 'DM Mono', monospace; }
+.stock-material-card > small { color: #7a878d; font-size: .62rem; line-height: 1.45; }
+.stock-received-note { margin: 10px 0 0; color: #839097; font-size: .64rem; line-height: 1.45; }
+.stock-detail-toggle { margin-top: 10px; }
+.stock-customer-card > .table-wrap { margin-top: 12px; }
+.supplier-po-detail-panel > .panel-heading { margin-bottom: 10px; }
+.supplier-po-details { padding-top: 11px; border-top: 1px solid #eeeae1; }
+.supplier-po-details > summary { color: var(--navy); cursor: pointer; font-size: .73rem; font-weight: 800; }
+.supplier-po-details > .table-wrap { margin-top: 10px; }
+body[data-tab="supplier"] .summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+@media (max-width: 900px) {
+  .stock-customer-grid { grid-template-columns: 1fr; }
+  body[data-tab="supplier"] .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .report-filter-toggle { align-items: flex-start; flex-direction: column; }
+  .report-filter-body .report-filter-top { align-items: flex-start; flex-direction: column; }
+  .report-plan-metrics { grid-template-columns: 1fr; }
+  .report-fullscreen-button { width: 100%; justify-content: center; }
+  .stock-customer-head { align-items: flex-start; flex-direction: column; }
+  .stock-received-total { text-align: left; }
+  body[data-tab="supplier"] .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 390px) {
+  .report-due-cards, .stock-material-grid { grid-template-columns: 1fr; }
+  body[data-tab="supplier"] .summary-grid { grid-template-columns: 1fr; }
+}
