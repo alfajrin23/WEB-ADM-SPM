@@ -1,5 +1,5 @@
 import {
-  supabase, isConfigured, loadProfile, loadWorkspace, loadReceivableHistory, loadInputLogs, loadWorkspaceUsers,
+  supabase, isConfigured, loadProfile, loadWorkspace, loadInputLogs, loadWorkspaceUsers,
   setWorkspaceId, setWorkspaceUserRole, saveRow, deleteRow, upsertRows,
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
@@ -62,8 +62,6 @@ const state = {
   reportCategoryKnownCategories: [],
   reportCategoryStorageKey: '',
   reportCategoryPreferenceError: false,
-  reportReceivableHistory: null,
-  reportReceivableHistoryLoadedAt: 0,
   reportFiltersOpen: false,
   reportIncomeWeek: null,
   reportIncomePlanPeriod: 'week',
@@ -235,9 +233,7 @@ async function refreshData({
   const requestedLogMonth = state.month;
   const shouldLoadLogs = isDeveloper && (forceLogs || state.inputLogsMonth !== requestedLogMonth || Date.now() - state.inputLogsLoadedAt > 60_000);
   const shouldLoadProfiles = isDeveloper && (forceProfiles || !state.profilesLoaded);
-  const shouldLoadReceivableHistory = state.tab === 'laporan'
-    && Date.now() - state.reportReceivableHistoryLoadedAt > 60_000;
-  if (!tablesToLoad.length && !shouldLoadLogs && !shouldLoadProfiles && !shouldLoadReceivableHistory) {
+  if (!tablesToLoad.length && !shouldLoadLogs && !shouldLoadProfiles) {
     if (showLoading) render();
     return;
   }
@@ -251,11 +247,10 @@ async function refreshData({
     render();
   }
   try {
-    const [workspace, logs, profiles, receivableHistory] = await Promise.all([
+    const [workspace, logs, profiles] = await Promise.all([
       tablesToLoad.length ? loadWorkspace(tablesToLoad) : Promise.resolve(null),
       shouldLoadLogs ? loadInputLogs(requestedLogMonth) : Promise.resolve(null),
       shouldLoadProfiles ? loadWorkspaceUsers() : Promise.resolve(null),
-      shouldLoadReceivableHistory ? loadReceivableHistory() : Promise.resolve(null),
     ]);
     if (state.session?.user?.id !== userId) return;
     if (workspace) {
@@ -273,10 +268,6 @@ async function refreshData({
     if (profiles) {
       state.profiles = profiles;
       state.profilesLoaded = true;
-    }
-    if (receivableHistory) {
-      state.reportReceivableHistory = receivableHistory;
-      state.reportReceivableHistoryLoadedAt = Date.now();
     }
   } catch (error) {
     if (state.session?.user?.id === userId) state.loadError = friendlyError(error);
@@ -895,7 +886,6 @@ async function runImport() {
   const tablesToRefresh = [preview.type];
   const conflict = preview.type === 'supplier_purchase_orders' ? 'workspace_id,po_number' : 'workspace_id,source_key';
   await upsertRows(preview.type, preview.records, conflict);
-  if (preview.type === 'sales_invoices') state.reportReceivableHistoryLoadedAt = 0;
   if (preview.type === 'cashflow_transactions' && preview.openingBalance != null) {
     const { error } = await supabase.from('company_settings').upsert({
       owner_id: state.session.user.id, workspace_id: state.profile.workspace_id,
@@ -1082,7 +1072,7 @@ async function handleClick(event) {
       const updated = await saveRow('sales_invoices', {
         paid_date: null, paid_amount: 0, outstanding_amount: invoice.amount,
       }, invoice.id);
-      updateLocalRow('sales_invoices', updated); state.reportReceivableHistoryLoadedAt = 0; render();
+      updateLocalRow('sales_invoices', updated); render();
       toast('Invoice ditandai belum lunas.');
     } catch (error) { toast(friendlyError(error), 'error'); }
     return;
@@ -1278,9 +1268,6 @@ async function handleSubmit(event) {
     const action = form.dataset.action;
     if (result?.deleted) removeLocalRow(result.table, result.id);
     else if (tableByAction[action] && result) updateLocalRow(tableByAction[action], result);
-    if (['save-invoice', 'mark-invoice-paid'].includes(action) || (result?.deleted && result.table === 'sales_invoices')) {
-      state.reportReceivableHistoryLoadedAt = 0;
-    }
     state.modal = null;
     state.pendingDelete = null;
     state.inputLogsMonth = '';
@@ -1318,8 +1305,6 @@ async function activateSession(session) {
     state.inputLogsLoadedAt = 0;
     state.profiles = [];
     state.profilesLoaded = false;
-    state.reportReceivableHistory = null;
-    state.reportReceivableHistoryLoadedAt = 0;
     state.reportCategoryStorageKey = '';
     state.reportCategories = null;
     state.reportCategoryKnownCategories = [];

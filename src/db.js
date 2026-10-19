@@ -13,8 +13,6 @@ const workspaceColumns = {
   cashflow_transactions: 'id, transaction_date, category, requester, description, amount, kind',
   supplier_ledger_entries: 'id, supplier, entry_date, entry_type, amount, description, linked_bill_id, created_at',
   sales_invoices: 'id, invoice_date, due_date, paid_date, customer, invoice_number, po_number, amount, paid_amount, outstanding_amount',
-  customer_receivable_baselines: 'workspace_id, captured_at, opening_balance',
-  customer_receivable_events: 'id, workspace_id, invoice_id, event_date, event_type, balance_delta, created_at',
   supplier_purchase_orders: 'id, po_number, supplier, customer, order_date, items',
   customer_orders: 'id, order_date, due_date, po_number, customer, spm_skg, item, size, qty_order, qty_produced, qty_delivered, unit_price, amount, po_tax_amount, total_price, size_sheet, floot, score, height, score_secondary',
   production_events: 'id, customer_order_id, event_date, cause_category, cause_detail, affected_qty, status',
@@ -24,8 +22,6 @@ const workspaceOrderColumns = {
   cashflow_transactions: 'id',
   supplier_ledger_entries: 'id',
   sales_invoices: 'id',
-  customer_receivable_baselines: 'workspace_id',
-  customer_receivable_events: 'id',
   supplier_purchase_orders: 'id',
   customer_orders: 'id',
   production_events: 'id',
@@ -63,22 +59,6 @@ export async function loadWorkspace(tables = Object.keys(workspaceColumns)) {
     }
   }));
   return Object.fromEntries(results);
-}
-
-export async function loadReceivableHistory() {
-  try {
-    const rows = await loadWorkspace(['customer_receivable_baselines', 'customer_receivable_events']);
-    return {
-      available: true,
-      baselines: rows.customer_receivable_baselines || [],
-      events: rows.customer_receivable_events || [],
-    };
-  } catch (error) {
-    if (['42P01', 'PGRST204', 'PGRST205'].includes(error?.code)) {
-      return { available: false, baselines: [], events: [] };
-    }
-    throw error;
-  }
 }
 
 export async function loadInputLogs(month) {
