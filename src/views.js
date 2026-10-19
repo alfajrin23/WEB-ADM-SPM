@@ -434,7 +434,11 @@ function payables(data, state) {
       const linkedLabel = linkedBill
         ? `<small class="supplier-payment-link">Untuk tagihan ${formatDate(linkedBill.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${esc(linkedBill.description || 'Tanpa keterangan')} · ${money(linkedBill.amount)}</small>`
         : row.entry_type === 'payment' ? '<small class="supplier-payment-link supplier-payment-unlinked">Pembayaran belum ditautkan ke tagihan tertentu.</small>' : '';
-      return `<tr><td>${formatDate(row.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td><td><span>${esc(description)}</span>${linkedLabel}</td><td class="numeric">${billAmount}</td><td class="numeric">${paymentAmount}</td><td class="numeric">${money(Math.max(balance, 0))}</td><td class="row-actions">${smallButton('Edit tagihan atau pembayaran', 'edit', `data-table="supplier_ledger_entries" data-id="${row.id}"`)}${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+      const sourceLabel = row.cashflow_transaction_id ? '<small class="supplier-payment-link">Sumber pembayaran: Cashflow</small>' : '';
+      const actions = row.cashflow_transaction_id
+        ? '<span class="supplier-payment-source">Kelola dari Cashflow</span>'
+        : `${smallButton('Edit tagihan atau pembayaran', 'edit', `data-table="supplier_ledger_entries" data-id="${row.id}"`)}${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}`;
+      return `<tr><td>${formatDate(row.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td><td><span>${esc(description)}</span>${linkedLabel}${sourceLabel}</td><td class="numeric">${billAmount}</td><td class="numeric">${paymentAmount}</td><td class="numeric">${money(Math.max(balance, 0))}</td><td class="row-actions">${actions}</td></tr>`;
     }).join('');
     const paymentAction = supplier.balance > 0
       ? actionButton('Bayar', 'new-supplier-payment', `data-supplier="${esc(supplier.name)}"`, 'wallet', 'secondary')

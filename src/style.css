@@ -335,6 +335,8 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .supplier-card .table-wrap table { min-width: 660px; }
 .supplier-payment-link { display: block; margin-top: 3px; color: #6f7d83; font-size: .65rem; line-height: 1.4; }
 .supplier-payment-unlinked { color: #9a6e2d; }
+.supplier-payment-source { display: block; color: #527568; font-size: .65rem; line-height: 1.4; }
+.cashflow-supplier-link[hidden] { display: none; }
 .supplier-payment-preview { grid-column: 1 / -1; margin: 0; padding: 10px 12px; border: 1px solid #e8e3d9; border-radius: 11px; background: #f8f6f0; color: #52616a; font-size: .72rem; line-height: 1.5; }
 .empty-state { display: grid; justify-items: center; padding: 29px 16px; text-align: center; }
 .empty-icon { display: grid; width: 52px; height: 52px; place-items: center; border: 1px solid #e0e3df; border-radius: 17px 17px 17px 6px; background: #f1f3ed; color: #71838c; }
