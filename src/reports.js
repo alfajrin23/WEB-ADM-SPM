@@ -175,7 +175,6 @@ export function buildReport(data, state) {
   const supplierRows = supplierScopeRows.filter((row) => inPeriod(row.entry_date, period));
   const supplierBillRows = supplierScopeRows.filter((row) => row.entry_type === 'bill');
   const supplierNewBillRows = supplierBillRows.filter((row) => String(row.entry_date || '').slice(0, 10) >= NEW_SUPPLIER_START);
-  const supplierOldBillRows = supplierBillRows.filter((row) => String(row.entry_date || '').slice(0, 10) < NEW_SUPPLIER_START);
   const supplierBillsInPeriod = sum(supplierRows.filter((row) => row.entry_type === 'bill'), (row) => amountOf(row.amount));
   const supplierPayments = sum(supplierRows.filter((row) => row.entry_type === 'payment'), (row) => amountOf(row.amount));
   const supplierBillsById = new Map(supplierEntries
@@ -203,18 +202,6 @@ export function buildReport(data, state) {
   const supplierNewOutstanding = sum(supplierNewBillRows, (row) => Math.max(
     amountOf(row.amount) - (supplierLinkedPaymentsByBill.get(String(row.id)) || 0), 0,
   ));
-  const supplierOldOutstanding = sum(supplierOldBillRows, (row) => Math.max(
-    amountOf(row.amount) - (supplierLinkedPaymentsByBill.get(String(row.id)) || 0), 0,
-  ));
-  const supplierBalances = new Map();
-  supplierScopeRows.forEach((row) => {
-    const key = String(row.supplier || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
-    if (!key) return;
-    const balance = supplierBalances.get(key) || { bills: 0, payments: 0 };
-    balance[row.entry_type === 'bill' ? 'bills' : 'payments'] += amountOf(row.amount);
-    supplierBalances.set(key, balance);
-  });
-  const supplierOutstanding = sum([...supplierBalances.values()], (row) => Math.max(row.bills - row.payments, 0));
 
   return {
     period,
@@ -243,15 +230,12 @@ export function buildReport(data, state) {
     supplierScopeRows,
     supplierRows,
     supplierNewBillRows,
-    supplierOldBillRows,
     supplierBillsInPeriod,
     supplierPayments,
     supplierPaymentsToNewBills,
     supplierPaymentsToOldBills,
     supplierUnallocatedPaymentsThroughPeriod,
     supplierNewOutstanding,
-    supplierOldOutstanding,
-    supplierOutstanding,
     supplierPaymentRows,
   };
 }
@@ -355,11 +339,12 @@ function reportSupplierPanel(report) {
     ? `<details class="report-history-details"><summary>Pembayaran supplier pada ${esc(report.periodName)} (${integer(report.supplierPaymentRows.length)})</summary><div class="table-wrap"><table><thead><tr><th>Pemasok</th><th>Tanggal bayar</th><th>Tanggal piutang</th><th>Kelompok</th><th>Keterangan</th><th class="numeric">Dibayar</th></tr></thead><tbody>${paymentRows}</tbody></table></div></details>`
     : `<p class="report-source-note">Tidak ada pembayaran supplier tercatat pada ${esc(report.periodName)}.</p>`;
   const newBillTotal = sum(report.supplierNewBillRows, (row) => amountOf(row.amount));
-  const oldBillTotal = sum(report.supplierOldBillRows, (row) => amountOf(row.amount));
+  const newPaymentCount = report.supplierPaymentRows.filter((row) => row.allocation === 'new').length;
+  const oldPaymentCount = report.supplierPaymentRows.filter((row) => row.allocation === 'old').length;
   const unallocatedNote = report.supplierUnallocatedPaymentsThroughPeriod > 0
     ? `<div class="notice notice-warn report-data-status"><span>${rupiah(report.supplierUnallocatedPaymentsThroughPeriod)} pembayaran sampai akhir ${esc(report.periodName)} belum tertaut ke tagihan, sehingga belum dimasukkan ke piutang baru atau lama.</span></div>`
     : '';
-  return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">MENU PIUTANG · KEWAJIBAN PEMASOK</p><h2 id="report-supplier-title">Utang supplier</h2><p>Pembayaran dikelompokkan berdasarkan tanggal tagihan yang dibayar: baru mulai 1 Okt 2026, lama sebelum tanggal tersebut.</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportBreakdownCard('Piutang baru · mulai 1 Okt 2026', rupiah(report.supplierNewOutstanding), `${integer(report.supplierNewBillRows.length)} tagihan · total tagihan ${rupiah(newBillTotal)} · dibayar pada ${report.periodName}: ${rupiah(report.supplierPaymentsToNewBills)}.`, 'blue')}${reportBreakdownCard('Piutang lama · sebelum 1 Okt 2026', rupiah(report.supplierOldOutstanding), `${integer(report.supplierOldBillRows.length)} tagihan · total tagihan ${rupiah(oldBillTotal)} · dibayar pada ${report.periodName}: ${rupiah(report.supplierPaymentsToOldBills)}.`, 'gold')}</div>${unallocatedNote}${paymentDetails}<p class="report-source-note">Saldo baru dan lama hanya mengurangi pembayaran yang tertaut ke tagihan terkait. Pembayaran tanpa tautan belum dapat dipastikan tanggal piutangnya. Sumber: menu Piutang (supplier_ledger_entries); tabel ini tidak menyimpan tanggal jatuh tempo.</p></section>`;
+  return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">MENU PIUTANG · KEWAJIBAN PEMASOK</p><h2 id="report-supplier-title">Utang supplier</h2><p>Saldo menampilkan piutang baru sejak 1 Okt 2026. Pembayaran pada ${esc(report.periodName)} dipisahkan menurut tanggal tagihan yang dibayar.</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportBreakdownCard('Total piutang baru · mulai 1 Okt 2026', rupiah(report.supplierNewOutstanding), `${integer(report.supplierNewBillRows.length)} tagihan · total tagihan baru ${rupiah(newBillTotal)} sampai akhir ${report.periodName}.`, 'blue')}${reportBreakdownCard(`Pembayaran piutang baru · ${report.periodName}`, rupiah(report.supplierPaymentsToNewBills), `${integer(newPaymentCount)} pembayaran untuk tagihan bertanggal mulai 1 Okt 2026.`, 'green')}${reportBreakdownCard(`Pembayaran piutang lama · ${report.periodName}`, rupiah(report.supplierPaymentsToOldBills), `${integer(oldPaymentCount)} pembayaran untuk tagihan bertanggal sebelum 1 Okt 2026.`, 'gold')}</div>${unallocatedNote}${paymentDetails}<p class="report-source-note">Kedua total pembayaran dikelompokkan berdasarkan tanggal tagihan yang ditautkan, bukan tanggal pembayaran. Pembayaran tanpa tautan belum dapat dipastikan tanggal piutangnya. Sumber: menu Piutang (supplier_ledger_entries).</p></section>`;
 }
 
 function reportCSV(report, state) {
@@ -380,12 +365,9 @@ function reportCSV(report, state) {
     ['Cashflow aktual', 'Kas masuk', numericCell(report.cashflow.cashIn), 'Jumlah kind=credit.'],
     ['Cashflow aktual', 'Kas keluar', numericCell(report.cashflow.cashOut), 'Jumlah kind=debit.'],
     ['Cashflow aktual', 'Arus kas bersih', numericCell(report.cashflow.net), 'Kas masuk dikurangi kas keluar.'],
-    ['Utang supplier', 'Saldo per pemasok sampai akhir periode', numericCell(report.supplierOutstanding), `Saldo semua tagihan dikurangi pembayaran supplier sampai akhir ${report.periodName}.`],
     ['Utang supplier', 'Tagihan piutang baru sejak 1 Okt 2026', numericCell(sum(report.supplierNewBillRows, (row) => amountOf(row.amount))), `${integer(report.supplierNewBillRows.length)} tagihan sampai akhir ${report.periodName}.`],
     ['Utang supplier', 'Saldo piutang baru', numericCell(report.supplierNewOutstanding), `Pembayaran tertaut ke tagihan baru dikurangi sampai akhir ${report.periodName}.`],
     ['Utang supplier', `Pembayaran piutang baru · ${report.periodName}`, numericCell(report.supplierPaymentsToNewBills), 'Dikelompokkan menurut tanggal tagihan yang dibayar.'],
-    ['Utang supplier', 'Tagihan piutang lama sebelum 1 Okt 2026', numericCell(sum(report.supplierOldBillRows, (row) => amountOf(row.amount))), `${integer(report.supplierOldBillRows.length)} tagihan sampai akhir ${report.periodName}.`],
-    ['Utang supplier', 'Saldo piutang lama', numericCell(report.supplierOldOutstanding), `Pembayaran tertaut ke tagihan lama dikurangi sampai akhir ${report.periodName}.`],
     ['Utang supplier', `Pembayaran piutang lama · ${report.periodName}`, numericCell(report.supplierPaymentsToOldBills), 'Dikelompokkan menurut tanggal tagihan yang dibayar.'],
     ['Utang supplier', `Tagihan supplier · ${report.periodName}`, numericCell(report.supplierBillsInPeriod), 'entry_type=bill pada bulan laporan.'],
     ['Utang supplier', `Pembayaran supplier · ${report.periodName}`, numericCell(report.supplierPayments), 'entry_type=payment pada bulan laporan.'],
