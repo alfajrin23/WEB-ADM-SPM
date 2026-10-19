@@ -154,3 +154,6 @@ export function customerOrderFinancials(row) {
   };
 }
 
+export const supplierOrderReceivedQuantity = (item) =>
+  Number(item?.qtyDiterima ?? item?.qtyKirim ?? 0) || 0;
+

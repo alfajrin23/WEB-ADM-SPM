@@ -164,7 +164,7 @@ function parseSupplierOrders(rows, headerIndex, rowOffset, file, sheetName) {
       qlty: clean(row[i.quality]),
       sizeSheet: clean(row[i.size]),
       qtyOrder: quantity,
-      qtyKirim: toNumber(row[i.shipped]),
+      qtyDiterima: toNumber(row[i.shipped]),
       harga: toNumber(row[i.price]),
     });
   });

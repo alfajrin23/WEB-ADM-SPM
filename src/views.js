@@ -1,6 +1,6 @@
 import {
   CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, icon, integer,
-  inMonth, monthName, orderProgress, rupiah, statusForInvoice,
+  inMonth, monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity,
 } from './helpers.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
 import { renderReport } from './reports.js';
@@ -159,7 +159,7 @@ function incomePlanCards(plan, weekIndex, period = 'week') {
     customers.set(key, customer);
   });
   [...customers.values()].forEach((customer) => {
-    cards.push(card(customer.name, money(customer.amount), 'file', 'gold', `${isMonthly ? `Jatuh tempo ${monthName(plan.month)}` : 'Sesuai tanggal jatuh tempo'} · ${integer(customer.count)} invoice`));
+    cards.push(card(customer.name, money(customer.amount), 'file', 'gold', `${isMonthly ? '' : 'Sesuai tanggal jatuh tempo · '}${integer(customer.count)} invoice`));
   });
 
   return `<div class="metric-grid income-plan-cards">${cards.join('')}</div>`;
@@ -519,32 +519,30 @@ function production(data, state) {
 
 function purchaseOrderValues(item) {
   const ordered = Number(item.qtyOrder) || 0;
-  const shipped = Number(item.qtyKirim) || 0;
+  const received = supplierOrderReceivedQuantity(item);
   const price = Number(item.harga) || 0;
-  const stock = Math.max(ordered - shipped, 0);
-  const stockValue = stock * price;
-  const shippedValue = shipped * price;
-  const stockTax = stockValue * 0.11;
-  const shippedTax = shippedValue * 0.11;
-  return { ordered, shipped, price, stock, stockValue, stockTax, stockTotal: stockValue + stockTax, shippedValue, shippedTax, shippedTotal: shippedValue + shippedTax };
+  const remaining = Math.max(ordered - received, 0);
+  const receivedValue = received * price;
+  const receivedTax = receivedValue * 0.11;
+  return { ordered, received, remaining, price, receivedValue, receivedTax, receivedTotal: receivedValue + receivedTax };
 }
 
-function supplierStockGroups(items) {
+function supplierReceivedGroups(items) {
   const customers = new Map();
-  items.filter(({ values }) => values.stock > 0).forEach(({ order, item, index, values }) => {
+  items.filter(({ values }) => values.received > 0).forEach(({ order, item, index, values }) => {
     const name = String(order.customer || '').trim() || 'Customer belum dicatat';
     const customerKey = name.toLocaleLowerCase('id-ID');
-    const customer = customers.get(customerKey) || { name, entries: [], materials: new Map(), totalStockValue: 0 };
+    const customer = customers.get(customerKey) || { name, entries: [], materials: new Map(), totalReceivedValue: 0 };
     const material = [item.item, item.qlty, item.sizeSheet].map((value) => String(value || '').trim().toLocaleLowerCase('id-ID')).join('::');
     const materialRow = customer.materials.get(material) || {
       item: String(item.item || 'SHEET').trim(), qlty: String(item.qlty || '').trim(),
       sizeSheet: String(item.sizeSheet || '').trim(), qty: 0, value: 0,
     };
-    materialRow.qty += values.stock;
-    materialRow.value += values.stockTotal;
+    materialRow.qty += values.received;
+    materialRow.value += values.receivedTotal;
     customer.materials.set(material, materialRow);
     customer.entries.push({ order, item, index, values });
-    customer.totalStockValue += values.stockTotal;
+    customer.totalReceivedValue += values.receivedTotal;
     customers.set(customerKey, customer);
   });
   return [...customers.values()]
@@ -552,30 +550,30 @@ function supplierStockGroups(items) {
     .sort((a, b) => a.name.localeCompare(b.name, 'id-ID'));
 }
 
-function supplierStockCard(group, state) {
+function supplierReceivedCard(group, state) {
   const expanded = state.expandedSupplierCustomers.has(group.name);
-  const materialCards = group.materials.map((row) => `<article class="stock-material-card"><span>${esc(row.item)}${row.qlty || row.sizeSheet ? ` · ${esc([row.qlty, row.sizeSheet].filter(Boolean).join(' · '))}` : ''}</span><strong>Stock ${integer(row.qty)}</strong><small>Nilai stock + PPN · ${money(row.value)}</small></article>`).join('');
-  const details = group.entries.map(({ order, item, index, values }) => `<tr><td>${esc(order.supplier)}</td><td>${esc(item.item || 'SHEET')}<small class="table-sub">${esc([item.qlty, item.sizeSheet].filter(Boolean).join(' · '))}</small></td><td>${formatDate(order.order_date)}<small class="table-sub">${esc(order.po_number)}</small></td><td class="numeric">${integer(values.ordered)}</td><td class="numeric">${integer(values.shipped)}</td><td class="numeric"><strong>${integer(values.stock)}</strong></td><td class="numeric">${money(values.stockValue)}</td><td class="numeric">${money(values.stockTax)}</td><td class="numeric">${money(values.stockTotal)}</td><td class="row-actions">${smallButton('Ubah qty kirim ke customer', 'edit-shipped', `data-id="${order.id}" data-index="${index}"`, 'edit')}</td></tr>`).join('');
-  return `<article class="stock-customer-card"><div class="stock-customer-head"><div><p class="eyebrow">STOK BAHAN UNTUK</p><h3>${esc(group.name)}</h3><small>${integer(group.materials.length)} jenis bahan · ${integer(group.entries.length)} baris stok</small></div><div class="stock-received-total"><small>Total nilai stock + PPN</small><strong>${money(group.totalStockValue)}</strong></div></div><div class="stock-material-grid">${materialCards}</div><p class="stock-received-note">Stock tersedia = Qty order dari supplier − Qty kirim ke customer. Nilai stock memakai harga/unit PO dan PPN 11%.</p><button type="button" class="text-button stock-detail-toggle" aria-expanded="${expanded}" data-act="toggle-customer-stock" data-customer="${esc(group.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup detail pemasok' : `Detail pemasok (${integer(group.entries.length)})`}</button>${expanded ? tableWrap(`<table><thead><tr><th>Pemasok</th><th>Bahan</th><th>Tanggal / PO</th><th class="numeric">Qty order</th><th class="numeric">Qty kirim ke customer</th><th class="numeric">Stock</th><th class="numeric">Nilai stock</th><th class="numeric">PPN</th><th class="numeric">Nilai + PPN</th><th>Aksi</th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
+  const materialCards = group.materials.map((row) => `<article class="stock-material-card"><span>${esc(row.item)}${row.qlty || row.sizeSheet ? ` · ${esc([row.qlty, row.sizeSheet].filter(Boolean).join(' · '))}` : ''}</span><strong>Diterima ${integer(row.qty)}</strong><small>Nilai diterima + PPN · ${money(row.value)}</small></article>`).join('');
+  const details = group.entries.map(({ order, item, index, values }) => `<tr><td>${esc(order.supplier)}</td><td>${esc(item.item || 'SHEET')}<small class="table-sub">${esc([item.qlty, item.sizeSheet].filter(Boolean).join(' · '))}</small></td><td>${formatDate(order.order_date)}<small class="table-sub">${esc(order.po_number)}</small></td><td class="numeric">${integer(values.ordered)}</td><td class="numeric">${integer(values.received)}</td><td class="numeric">${integer(values.remaining)}</td><td class="numeric">${money(values.receivedValue)}</td><td class="numeric">${money(values.receivedTax)}</td><td class="numeric">${money(values.receivedTotal)}</td><td class="row-actions">${smallButton('Ubah qty diterima', 'edit-received', `data-id="${order.id}" data-index="${index}"`, 'edit')}</td></tr>`).join('');
+  return `<article class="stock-customer-card"><div class="stock-customer-head"><div><p class="eyebrow">BAHAN DITERIMA UNTUK</p><h3>${esc(group.name)}</h3><small>${integer(group.materials.length)} jenis bahan · ${integer(group.entries.length)} baris PO</small></div><div class="stock-received-total"><small>Total nilai diterima + PPN</small><strong>${money(group.totalReceivedValue)}</strong></div></div><div class="stock-material-grid">${materialCards}</div><p class="stock-received-note">Qty diterima adalah jumlah bahan yang sudah masuk dari pemasok. Sisa belum diterima = Qty order − Qty diterima.</p><button type="button" class="text-button stock-detail-toggle" aria-expanded="${expanded}" data-act="toggle-customer-stock" data-customer="${esc(group.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup detail pemasok' : `Detail pemasok (${integer(group.entries.length)})`}</button>${expanded ? tableWrap(`<table><thead><tr><th>Pemasok</th><th>Bahan</th><th>Tanggal / PO</th><th class="numeric">Qty order</th><th class="numeric">Qty diterima oleh kita</th><th class="numeric">Sisa belum diterima</th><th class="numeric">Nilai diterima</th><th class="numeric">PPN</th><th class="numeric">Nilai + PPN</th><th>Aksi</th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
 }
 
 function supplierOrders(data, state) {
   const orders = data.supplier_purchase_orders.filter((row) => !state.search || `${row.po_number} ${row.supplier} ${row.customer}`.toLowerCase().includes(state.search.toLowerCase())).sort((a, b) => (b.order_date || '').localeCompare(a.order_date || ''));
   const items = orders.flatMap((order) => (order.items || []).map((item, index) => ({ order, item, index, values: purchaseOrderValues(item) })));
   const totals = items.reduce((sum, row) => {
-    for (const key of ['ordered', 'shipped', 'stock', 'stockValue', 'stockTax', 'stockTotal', 'shippedValue', 'shippedTax', 'shippedTotal']) sum[key] += row.values[key];
+    for (const key of ['ordered', 'received', 'remaining', 'receivedValue', 'receivedTax', 'receivedTotal']) sum[key] += row.values[key];
     return sum;
-  }, { ordered: 0, shipped: 0, stock: 0, stockValue: 0, stockTax: 0, stockTotal: 0, shippedValue: 0, shippedTax: 0, shippedTotal: 0 });
+  }, { ordered: 0, received: 0, remaining: 0, receivedValue: 0, receivedTax: 0, receivedTotal: 0 });
   const lines = items.map(({ order, item, index, values }) => {
-    const ratio = values.ordered ? Math.min(100, values.shipped / values.ordered * 100) : 0;
-    const rowTone = values.shipped === 0 ? 'po-unstarted' : values.stock > 0 ? 'po-partial' : 'po-complete';
-    return `<tr class="${rowTone}" data-row-id="${order.id}"><td>${formatDate(order.order_date)}<small class="table-sub">${esc(order.po_number)}</small></td><td>${esc(order.supplier)}</td><td>${esc(order.customer || '—')}</td><td>${esc(item.item || 'SHEET')}<small class="table-sub">${esc(item.qlty || '')} · ${esc(item.sizeSheet || '')}</small></td><td class="numeric">${integer(values.ordered)}</td><td><strong>${integer(values.stock)}</strong><div class="table-progress"><i style="width:${ratio}%"></i></div><small>${ratio.toFixed(0)}% terkirim ke customer</small></td><td class="numeric">${money(values.price)}</td><td class="numeric">${money(values.stockValue)}</td><td class="numeric">${money(values.stockTax)}</td><td class="numeric">${money(values.stockTotal)}</td><td><button type="button" class="inline-number" data-act="edit-shipped" data-id="${order.id}" data-index="${index}">${integer(values.shipped)} ${icon('edit', 12)}</button></td><td class="numeric">${money(values.shippedValue)}</td><td class="numeric">${money(values.shippedTax)}</td><td class="numeric">${money(values.shippedTotal)}</td><td class="row-actions">${smallButton('Edit PO supplier', 'edit', `data-table="supplier_purchase_orders" data-id="${order.id}"`)}${smallButton('Hapus PO supplier', 'delete', `data-table="supplier_purchase_orders" data-id="${order.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+    const ratio = values.ordered ? Math.min(100, values.received / values.ordered * 100) : 0;
+    const rowTone = values.received === 0 ? 'po-unstarted' : values.remaining > 0 ? 'po-partial' : 'po-complete';
+    return `<tr class="${rowTone}" data-row-id="${order.id}"><td>${formatDate(order.order_date)}<small class="table-sub">${esc(order.po_number)}</small></td><td>${esc(order.supplier)}</td><td>${esc(order.customer || '—')}</td><td>${esc(item.item || 'SHEET')}<small class="table-sub">${esc(item.qlty || '')} · ${esc(item.sizeSheet || '')}</small></td><td class="numeric">${integer(values.ordered)}</td><td><button type="button" class="inline-number" data-act="edit-received" data-id="${order.id}" data-index="${index}">${integer(values.received)} ${icon('edit', 12)}</button><div class="table-progress"><i style="width:${ratio}%"></i></div><small>${ratio.toFixed(0)}% diterima</small></td><td class="numeric">${integer(values.remaining)}</td><td class="numeric">${money(values.price)}</td><td class="numeric">${money(values.receivedValue)}</td><td class="numeric">${money(values.receivedTax)}</td><td class="numeric">${money(values.receivedTotal)}</td><td class="row-actions">${smallButton('Edit PO supplier', 'edit', `data-table="supplier_purchase_orders" data-id="${order.id}"`)}${smallButton('Hapus PO supplier', 'delete', `data-table="supplier_purchase_orders" data-id="${order.id}"`, 'trash', 'danger-icon')}</td></tr>`;
   }).join('');
-  const stockGroups = supplierStockGroups(items);
-  return `${pageHead('OPERASIONAL', 'PO supplier', 'Pantau stock bahan per customer dari jumlah yang dipesan dan dikirim.', actionButton('Buat PO supplier', 'new-po', '', 'plus'))}
-    <div class="summary-grid">${statStrip('Item PO', integer(items.length))}${statStrip('Qty order dari supplier', integer(totals.ordered))}${statStrip('Qty kirim ke customer', integer(totals.shipped))}${statStrip('Stock tersedia', integer(totals.stock))}${statStrip('Nilai stock + PPN', money(totals.stockTotal))}</div>
-    <section class="panel stock-summary-section"><div class="panel-heading"><div><p class="eyebrow">REKAP BAHAN</p><h2>Stock tercatat per customer</h2><p>Stock tersedia = Qty order dari supplier − Qty kirim ke customer. Nilai stock dihitung dari sisa qty × harga/unit PO, ditambah PPN 11%.</p></div>${actionButton('Export CSV', 'export', 'data-kind="supplier-po"', 'download', 'secondary')}</div><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari PO supplier" data-filter="search" value="${esc(state.search)}" placeholder="Cari nomor PO, pemasok, atau customer"></label></div>${stockGroups.length ? `<div class="stock-customer-grid">${stockGroups.map((group) => supplierStockCard(group, state)).join('')}</div>` : emptyState('Belum ada stock bahan tersisa', items.length ? 'Semua item PO supplier sudah terkirim ke customer.' : 'Buat PO supplier untuk mulai mencatat bahan dan stock per customer.', items.length ? '' : 'new-po', items.length ? '' : 'Buat PO supplier', 'package')}</section>
-    <section class="panel supplier-po-detail-panel"><div class="panel-heading"><div><p class="eyebrow">PESANAN BAHAN</p><h2>Daftar PO supplier</h2><p>Rincian jumlah order, stock tersedia, dan pengiriman ke customer.</p></div></div>${items.length ? `<details class="supplier-po-details"><summary>Lihat tabel seluruh item PO (${integer(items.length)})</summary>${tableWrap(`<table class="wide-table"><thead><tr><th>Tanggal / No. PO</th><th>Pemasok</th><th>Customer</th><th>Item</th><th>Qty order dari supplier</th><th>Stock tersedia</th><th>Harga/unit</th><th>Nilai stock</th><th>PPN stock</th><th>Total stock</th><th>Qty kirim ke customer</th><th>Nilai terkirim</th><th>PPN terkirim</th><th>Total terkirim + PPN</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${lines}<tr class="total-row"><td colspan="4">Total seluruh PO</td><td class="numeric">${integer(totals.ordered)}</td><td class="numeric">${integer(totals.stock)}</td><td></td><td class="numeric">${money(totals.stockValue)}</td><td class="numeric">${money(totals.stockTax)}</td><td class="numeric">${money(totals.stockTotal)}</td><td class="numeric">${integer(totals.shipped)}</td><td class="numeric">${money(totals.shippedValue)}</td><td class="numeric">${money(totals.shippedTax)}</td><td class="numeric">${money(totals.shippedTotal)}</td><td></td></tr></tbody></table>`)}</details>` : emptyState('Belum ada PO supplier', 'Buat PO bahan untuk mulai mencatat pemasok, customer, dan jumlah bahan.', 'new-po', 'Buat PO supplier', 'package')}</section>`;
+  const receivedGroups = supplierReceivedGroups(items);
+  return `${pageHead('OPERASIONAL', 'PO supplier', 'Pantau jumlah bahan yang sudah diterima dari pemasok dan sisa yang belum diterima.', actionButton('Buat PO supplier', 'new-po', '', 'plus'))}
+    <div class="summary-grid">${statStrip('Item PO', integer(items.length))}${statStrip('Qty order dari supplier', integer(totals.ordered))}${statStrip('Qty diterima', integer(totals.received))}${statStrip('Sisa belum diterima', integer(totals.remaining))}${statStrip('Nilai diterima + PPN', money(totals.receivedTotal))}</div>
+    <section class="panel stock-summary-section"><div class="panel-heading"><div><p class="eyebrow">REKAP PENERIMAAN</p><h2>Bahan diterima per customer</h2><p>Qty diterima adalah jumlah yang sudah masuk dari pemasok. Sisa belum diterima = Qty order dari supplier − Qty diterima.</p></div>${actionButton('Export CSV', 'export', 'data-kind="supplier-po"', 'download', 'secondary')}</div><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari PO supplier" data-filter="search" value="${esc(state.search)}" placeholder="Cari nomor PO, pemasok, atau customer"></label></div>${receivedGroups.length ? `<div class="stock-customer-grid">${receivedGroups.map((group) => supplierReceivedCard(group, state)).join('')}</div>` : emptyState('Belum ada bahan diterima', items.length ? 'Belum ada jumlah penerimaan yang dicatat dari pemasok.' : 'Buat PO supplier untuk mulai mencatat pemasok, customer, dan jumlah bahan.', items.length ? '' : 'new-po', items.length ? '' : 'Buat PO supplier', 'package')}</section>
+    <section class="panel supplier-po-detail-panel"><div class="panel-heading"><div><p class="eyebrow">PESANAN BAHAN</p><h2>Daftar PO supplier</h2><p>Rincian qty order, qty diterima, dan sisa penerimaan dari pemasok.</p></div></div>${items.length ? `<details class="supplier-po-details"><summary>Lihat tabel seluruh item PO (${integer(items.length)})</summary>${tableWrap(`<table class="wide-table"><thead><tr><th>Tanggal / No. PO</th><th>Pemasok</th><th>Customer</th><th>Item</th><th>Qty order dari supplier</th><th>Qty diterima oleh kita</th><th>Sisa belum diterima</th><th>Harga/unit</th><th>Nilai diterima</th><th>PPN diterima</th><th>Total diterima + PPN</th><th>Aksi</th></tr></thead><tbody>${lines}<tr class="total-row"><td colspan="4">Total seluruh PO</td><td class="numeric">${integer(totals.ordered)}</td><td class="numeric">${integer(totals.received)}</td><td class="numeric">${integer(totals.remaining)}</td><td></td><td class="numeric">${money(totals.receivedValue)}</td><td class="numeric">${money(totals.receivedTax)}</td><td class="numeric">${money(totals.receivedTotal)}</td><td></td></tr></tbody></table>`)}</details>` : emptyState('Belum ada PO supplier', 'Buat PO bahan untuk mulai mencatat pemasok, customer, dan jumlah bahan.', 'new-po', 'Buat PO supplier', 'package')}</section>`;
 }
 
 function calculator(state) {

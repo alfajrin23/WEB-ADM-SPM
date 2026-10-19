@@ -5,7 +5,7 @@ import {
 import { inspectWorkbook } from './importer.js';
 import {
   CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, isoToday, localISODate,
-  monthName, orderProgress, rupiah, statusForInvoice, toNumber,
+  monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity, toNumber,
 } from './helpers.js';
 import { pageTabs, renderPage, renderSignIn } from './views.js';
 import { downloadReportCsv, reportCategoryOptions } from './reports.js';
@@ -33,7 +33,7 @@ const tableByAction = {
   'save-cashflow': 'cashflow_transactions', 'save-opening': 'company_settings',
   'save-supplier-entry': 'supplier_ledger_entries', 'save-invoice': 'sales_invoices', 'mark-invoice-paid': 'sales_invoices',
   'save-customer-order': 'customer_orders', 'save-production-event': 'production_events',
-  'save-po': 'supplier_purchase_orders', 'save-shipped': 'supplier_purchase_orders',
+  'save-po': 'supplier_purchase_orders', 'save-received': 'supplier_purchase_orders',
   'save-quantities': 'customer_orders',
 };
 
@@ -339,7 +339,7 @@ function invoicePaymentDateModal(invoice) {
   openModal({
     title: 'Catat pembayaran invoice', action: 'mark-invoice-paid', submit: 'Simpan pembayaran',
     attrs: `data-id="${esc(invoice.id)}"`,
-    body: `<p class="confirm-copy">Catat pembayaran untuk invoice <strong>${esc(invoice.invoice_number || '')}</strong>. Sisa tercatat ${rupiah(balance)}.</p><div class="form-grid">${inputField('Jumlah pembayaran', 'payment_amount', balance, 'number', { required: true, min: 0.01, step: '0.01', money: true })}${inputField('Tanggal pembayaran', 'paid_date', isoToday(), 'date', { required: true })}</div><p class="form-hint">Pembayaran dapat dicatat sebagian. Setiap perubahan jumlah dan tanggal tersimpan pada riwayat piutang setelah migration dijalankan.</p>`,
+    body: `<p class="confirm-copy">Catat pembayaran untuk invoice <strong>${esc(invoice.invoice_number || '')}</strong>. Sisa tercatat ${rupiah(balance)}.</p><div class="form-grid">${inputField('Jumlah pembayaran', 'payment_amount', balance, 'number', { required: true, min: 0.01, step: '0.01', money: true })}${inputField('Tanggal pembayaran', 'paid_date', isoToday(), 'date', { required: true })}</div><p class="form-hint">Pembayaran dapat dicatat sebagian. Setelah migration dijalankan, pembayaran masuk ke riwayat piutang dan otomatis tercatat di cashflow kategori Cicilan.</p>`,
   });
 }
 
@@ -473,7 +473,7 @@ function productionEventModal(orderId = '', row = {}) {
 function supplierOrderModal(row = {}) {
   const draft = {
     id: row.id || '', po_number: row.po_number || '', supplier: row.supplier || '', customer: row.customer || '',
-    order_date: row.order_date || isoToday(), items: row.items?.length ? row.items : [{ item: 'SHEET', qlty: 'BF', sizeSheet: '', qtyOrder: '', qtyKirim: 0, harga: '' }],
+    order_date: row.order_date || isoToday(), items: row.items?.length ? row.items : [{ item: 'SHEET', qlty: 'BF', sizeSheet: '', qtyOrder: '', qtyDiterima: 0, harga: '' }],
   };
   state.poDraft = draft;
   openModal({ title: draft.id ? 'Edit PO supplier' : 'PO supplier baru', action: 'save-po', submit: draft.id ? 'Simpan perubahan' : 'Simpan PO', attrs: draft.id ? `data-id="${draft.id}"` : '', width: 'modal-wide', body: supplierPoForm(draft) });
@@ -489,13 +489,14 @@ function supplierPoForm(draft) {
 }
 
 function supplierPoItem(item, index) {
+  const received = supplierOrderReceivedQuantity(item);
   const calc = {
-    kurang: Math.max(Number(item.qtyOrder || 0) - Number(item.qtyKirim || 0), 0),
-    actual: toNumber(item.qtyKirim) * toNumber(item.harga),
+    remaining: Math.max(Number(item.qtyOrder || 0) - received, 0),
+    receivedValue: received * toNumber(item.harga),
   };
   return `<section class="po-item-row" data-po-item><div class="po-item-top"><strong>Item ${index + 1}</strong><button type="button" class="icon-button danger-icon" aria-label="Hapus item" title="Hapus item" data-act="remove-po-item">${icon('trash', 15)}</button></div>
-    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order dari supplier</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty kirim ke customer</span><input name="item-shipped" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyKirim || 0)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc data-money-input data-min="0" data-step="0.01" inputmode="decimal" autocomplete="off" type="text" value="${esc(formatNumberInput(item.harga))}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
-    <div class="po-item-calc"><span>Stock tersedia <b data-calc-short>${new Intl.NumberFormat('id-ID').format(calc.kurang)}</b></span><span>Nilai terkirim ke customer <b data-calc-value>${rupiah(calc.actual)}</b></span></div></section>`;
+    <div class="po-item-fields"><label class="field"><span>Nama item</span><input name="item-item" value="${esc(item.item || 'SHEET')}" required></label><label class="field"><span>QLTY</span><select name="item-qlty">${['BF', 'CF', 'AF', 'BC/F', 'BA/F', 'E/F'].map((value) => `<option ${value === item.qlty ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label class="field"><span>SIZE SHEET</span><input name="item-size" value="${esc(item.sizeSheet || '')}" placeholder="104 X 116"></label><label class="field"><span>Qty order dari supplier</span><input name="item-ordered" data-po-calc type="number" min="0" step="0.01" value="${esc(item.qtyOrder)}" required></label><label class="field"><span>Qty telah diterima oleh kita</span><input name="item-received" data-po-calc type="number" min="0" step="0.01" value="${esc(received)}"></label><label class="field"><span>Harga / unit</span><div class="price-input-row"><input name="item-price" data-po-calc data-money-input data-min="0" data-step="0.01" inputmode="decimal" autocomplete="off" type="text" value="${esc(formatNumberInput(item.harga))}" required><button class="text-button" type="button" data-act="calculator-for" data-index="${index}">${icon('calculator', 14)} Hitung harga</button></div></label></div>
+    <div class="po-item-calc"><span>Sisa belum diterima <b data-calc-short>${new Intl.NumberFormat('id-ID').format(calc.remaining)}</b></span><span>Nilai diterima <b data-calc-value>${rupiah(calc.receivedValue)}</b></span></div></section>`;
 }
 
 function confirmDelete(table, id) {
@@ -632,28 +633,28 @@ function exportData(kind) {
     const orders = state.data.supplier_purchase_orders.filter((order) => order.order_date?.startsWith(state.month))
       .sort((a, b) => (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
     const items = orders.flatMap((order) => (order.items || []).map((item) => {
-      const ordered = Number(item.qtyOrder) || 0; const shipped = Number(item.qtyKirim) || 0; const price = Number(item.harga) || 0;
-      const stock = Math.max(ordered - shipped, 0); const stockValue = stock * price; const shippedValue = shipped * price;
-      return { order, item, ordered, shipped, price, stock, stockValue, stockTax: stockValue * .11, shippedValue, shippedTax: shippedValue * .11, shippedTotal: shippedValue * 1.11 };
+      const ordered = Number(item.qtyOrder) || 0; const received = supplierOrderReceivedQuantity(item); const price = Number(item.harga) || 0;
+      const remaining = Math.max(ordered - received, 0); const receivedValue = received * price;
+      return { order, item, ordered, received, remaining, price, receivedValue, receivedTax: receivedValue * .11, receivedTotal: receivedValue * 1.11 };
     }));
     const totals = items.reduce((sum, row) => {
-      for (const key of ['ordered', 'shipped', 'stock', 'stockValue', 'stockTax', 'shippedValue', 'shippedTax', 'shippedTotal']) sum[key] += row[key];
+      for (const key of ['ordered', 'received', 'remaining', 'receivedValue', 'receivedTax', 'receivedTotal']) sum[key] += row[key];
       return sum;
-    }, { ordered: 0, shipped: 0, stock: 0, stockValue: 0, stockTax: 0, shippedValue: 0, shippedTax: 0, shippedTotal: 0 });
-    const details = items.map(({ order, item, ordered, shipped, price, stock, stockValue, stockTax, shippedValue, shippedTax, shippedTotal }) => [
+    }, { ordered: 0, received: 0, remaining: 0, receivedValue: 0, receivedTax: 0, receivedTotal: 0 });
+    const details = items.map(({ order, item, ordered, received, remaining, price, receivedValue, receivedTax, receivedTotal }) => [
       csvDate(order.order_date), order.po_number || '—', order.supplier || '—', order.customer || '—', item.item || 'SHEET',
-      item.qlty || '—', item.sizeSheet || '—', csvQuantity(ordered), csvQuantity(stock), csvMoney(price), csvMoney(stockValue),
-      csvMoney(stockTax), csvQuantity(shipped), csvMoney(shippedValue), csvMoney(shippedTax), csvMoney(shippedTotal),
+      item.qlty || '—', item.sizeSheet || '—', csvQuantity(ordered), csvQuantity(received), csvQuantity(remaining), csvMoney(price),
+      csvMoney(receivedValue), csvMoney(receivedTax), csvMoney(receivedTotal),
     ]);
-    downloadReport(`spm-po-supplier-${state.month}.csv`, 'Rekap stock bahan PO supplier', period, [
+    downloadReport(`spm-po-supplier-${state.month}.csv`, 'Rekap penerimaan bahan PO supplier', period, [
       ['Jumlah PO', csvQuantity(new Set(orders.map((order) => order.po_number).filter(Boolean)).size)],
       ['Jumlah supplier', csvQuantity(new Set(orders.map((order) => String(order.supplier || '').trim().toLocaleLowerCase('id-ID')).filter(Boolean)).size)],
-      ['Jumlah baris item', csvQuantity(items.length)], ['Total qty dipesan dari supplier', csvQuantity(totals.ordered)],
-      ['Total qty terkirim ke customer', csvQuantity(totals.shipped)], ['Total stock tersedia', csvQuantity(totals.stock)],
-      ['Nilai stock sebelum PPN (Rp)', csvMoney(totals.stockValue)], ['PPN stock (Rp)', csvMoney(totals.stockTax)],
-      ['Total nilai stock termasuk PPN (Rp)', csvMoney(totals.stockTotal)],
-    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order dari supplier', 'Stock tersedia', 'Harga/unit (Rp)', 'Nilai stock (Rp)', 'PPN stock (Rp)', 'Qty kirim ke customer', 'Nilai terkirim (Rp)', 'PPN terkirim (Rp)', 'Total terkirim + PPN (Rp)'], details,
-    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.stock), '', csvMoney(totals.stockValue), csvMoney(totals.stockTax), csvQuantity(totals.shipped), csvMoney(totals.shippedValue), csvMoney(totals.shippedTax), csvMoney(totals.shippedTotal)]);
+      ['Jumlah baris item', csvQuantity(items.length)], ['Total qty order dari supplier', csvQuantity(totals.ordered)],
+      ['Total qty diterima oleh kita', csvQuantity(totals.received)], ['Total qty belum diterima', csvQuantity(totals.remaining)],
+      ['Nilai diterima sebelum PPN (Rp)', csvMoney(totals.receivedValue)], ['PPN penerimaan (Rp)', csvMoney(totals.receivedTax)],
+      ['Total nilai diterima termasuk PPN (Rp)', csvMoney(totals.receivedTotal)],
+    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order dari supplier', 'Qty diterima oleh kita', 'Sisa belum diterima', 'Harga/unit (Rp)', 'Nilai diterima (Rp)', 'PPN diterima (Rp)', 'Total diterima + PPN (Rp)'], details,
+    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.received), csvQuantity(totals.remaining), '', csvMoney(totals.receivedValue), csvMoney(totals.receivedTax), csvMoney(totals.receivedTotal)]);
   } else if (kind === 'supplier-ledger') {
     const all = state.data.supplier_ledger_entries;
     const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
@@ -848,7 +849,7 @@ async function saveModal(form) {
       qlty: section.querySelector('[name="item-qlty"]').value,
       sizeSheet: section.querySelector('[name="item-size"]').value.trim(),
       qtyOrder: toNumber(section.querySelector('[name="item-ordered"]').value),
-      qtyKirim: toNumber(section.querySelector('[name="item-shipped"]').value),
+      qtyDiterima: toNumber(section.querySelector('[name="item-received"]').value),
       harga: toNumber(section.querySelector('[name="item-price"]').value),
     }));
     if (!items.length) throw new Error('Tambahkan setidaknya satu item pada PO.');
@@ -856,12 +857,18 @@ async function saveModal(form) {
       order_date: values.order_date, po_number: values.po_number.trim(), supplier: values.supplier.trim(), customer: values.customer.trim(), items,
     }, id);
   }
-  if (action === 'save-shipped') {
+  if (action === 'save-received') {
     const order = state.data.supplier_purchase_orders.find((item) => item.id === values.po_id);
     if (!order) throw new Error('PO supplier tidak ditemukan.');
-    const items = [...(order.items || [])];
-    items[Number(values.item_index)].qtyOrder = num('qtyOrder');
-    items[Number(values.item_index)].qtyKirim = num('qtyKirim');
+    const items = (order.items || []).map((item) => {
+      const normalized = { ...item, qtyDiterima: supplierOrderReceivedQuantity(item) };
+      delete normalized.qtyKirim;
+      return normalized;
+    });
+    const item = items[Number(values.item_index)];
+    if (!item) throw new Error('Item PO supplier tidak ditemukan.');
+    item.qtyOrder = num('qtyOrder');
+    item.qtyDiterima = num('qtyDiterima');
     return saveRow('supplier_purchase_orders', { items }, order.id);
   }
   if (action === 'save-quantities') {
@@ -905,12 +912,12 @@ function updatePoPreview(target) {
   const item = target.closest('[data-po-item]');
   if (!item) return;
   const ordered = toNumber(item.querySelector('[name="item-ordered"]').value);
-  const shipped = toNumber(item.querySelector('[name="item-shipped"]').value);
+  const received = toNumber(item.querySelector('[name="item-received"]').value);
   const price = toNumber(item.querySelector('[name="item-price"]').value);
   const short = item.querySelector('[data-calc-short]');
   const actual = item.querySelector('[data-calc-value]');
-  if (short) short.textContent = new Intl.NumberFormat('id-ID').format(Math.max(ordered - shipped, 0));
-  if (actual) actual.textContent = rupiah(shipped * price);
+  if (short) short.textContent = new Intl.NumberFormat('id-ID').format(Math.max(ordered - received, 0));
+  if (actual) actual.textContent = rupiah(received * price);
 }
 
 function formatMoneyInput(target) {
@@ -970,7 +977,7 @@ function preservePoDraft() {
     items: [...form.querySelectorAll('[data-po-item]')].map((section) => ({
       item: section.querySelector('[name="item-item"]').value, qlty: section.querySelector('[name="item-qlty"]').value,
       sizeSheet: section.querySelector('[name="item-size"]').value, qtyOrder: section.querySelector('[name="item-ordered"]').value,
-      qtyKirim: section.querySelector('[name="item-shipped"]').value, harga: section.querySelector('[name="item-price"]').value,
+      qtyDiterima: section.querySelector('[name="item-received"]').value, harga: section.querySelector('[name="item-price"]').value,
     })),
   };
 }
@@ -1093,17 +1100,17 @@ async function handleClick(event) {
     openModal({ title: `Realisasi · ${row.po_number}`, action: 'save-quantities', submit: 'Simpan realisasi', body: `<input type="hidden" name="order_id" value="${row.id}"><div class="form-grid">${inputField('Jumlah diproduksi', 'qty_produced', row.qty_produced || 0, 'number', { min: 0, step: '0.01' })}${inputField('Delivery', 'qty_delivered', row.qty_delivered || 0, 'number', { min: 0, step: '0.01' })}${inputField('Size Sheet', 'size_sheet', row.size_sheet || '')}${inputField('Floot', 'floot', row.floot || '')}${inputField('Scoor', 'score', row.score || '')}${inputField('Tinggi', 'height', row.height || '')}${inputField('Scoor kedua', 'score_secondary', row.score_secondary || '')}</div><p class="form-hint">Nilai jual dihitung dari Delivery × PRICE. PPN realisasi mengikuti rumus workbook (11%); selisih kirim dan kurang jual dihitung otomatis.</p>` });
     return;
   }
-  if (action === 'edit-shipped') {
+  if (action === 'edit-received') {
     const order = state.data.supplier_purchase_orders.find((row) => row.id === button.dataset.id);
     const item = order?.items?.[Number(button.dataset.index)];
     if (!order || !item) return;
-    openModal({ title: `Update qty kirim ke customer · ${order.po_number}`, action: 'save-shipped', submit: 'Simpan qty kirim', body: `<input type="hidden" name="po_id" value="${order.id}"><input type="hidden" name="item_index" value="${button.dataset.index}"><div class="form-grid">${inputField('Qty order dari supplier', 'qtyOrder', item.qtyOrder, 'number', { min: 0, step: '0.01' })}${inputField('Qty kirim ke customer', 'qtyKirim', item.qtyKirim || 0, 'number', { min: 0, step: '0.01', required: true })}</div><p class="form-hint">Stock tersedia dihitung dari Qty order dikurangi Qty kirim ke customer.</p>` });
+    openModal({ title: `Update qty diterima · ${order.po_number}`, action: 'save-received', submit: 'Simpan qty diterima', body: `<input type="hidden" name="po_id" value="${order.id}"><input type="hidden" name="item_index" value="${button.dataset.index}"><div class="form-grid">${inputField('Qty order dari supplier', 'qtyOrder', item.qtyOrder, 'number', { min: 0, step: '0.01' })}${inputField('Qty telah diterima oleh kita', 'qtyDiterima', supplierOrderReceivedQuantity(item), 'number', { min: 0, step: '0.01', required: true })}</div><p class="form-hint">Sisa belum diterima dihitung dari Qty order dikurangi Qty diterima.</p>` });
     return;
   }
   if (action === 'add-po-item') {
     const form = document.querySelector('.modal-form[data-action="save-po"]');
     const list = form?.querySelector('.po-item-list');
-    if (list) list.insertAdjacentHTML('beforeend', supplierPoItem({ item: 'SHEET', qlty: 'BF', qtyOrder: '', qtyKirim: 0, harga: '' }, list.children.length));
+    if (list) list.insertAdjacentHTML('beforeend', supplierPoItem({ item: 'SHEET', qlty: 'BF', qtyOrder: '', qtyDiterima: 0, harga: '' }, list.children.length));
     return;
   }
   if (action === 'remove-po-item') {
