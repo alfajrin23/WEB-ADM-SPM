@@ -4,10 +4,10 @@ import {
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
 import {
-  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, isoToday, localISODate,
+  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, integer, isoToday, localISODate,
   monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity, toNumber,
 } from './helpers.js';
-import { pageTabs, renderPage, renderSignIn } from './views.js';
+import { calculatorValues, pageTabs, renderPage, renderSignIn } from './views.js';
 import { downloadReportCsv, reportCategoryOptions } from './reports.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
 import './style.css';
@@ -1252,12 +1252,8 @@ function handleInput(event) {
     return;
   }
   if (target.matches('[data-calc]')) {
-    const key = target.dataset.calc;
-    const position = target.type === 'text' ? target.selectionStart : null;
-    state.calculator[key] = target.value;
-    render();
-    const input = document.querySelector(`[data-calc="${key}"]`);
-    if (input) { input.focus(); if (position !== null) input.setSelectionRange(position, position); }
+    state.calculator[target.dataset.calc] = target.value;
+    updateCalculatorPreview();
     return;
   }
   if (target.matches('[data-po-calc]')) updatePoPreview(target);
@@ -1309,7 +1305,40 @@ async function handleChange(event) {
   if (target.matches('[data-filter="invoiceStatus"]')) { state.invoiceStatus = target.value; render(); return; }
   if (target.matches('[data-import-file]')) { await readImportFile(target.files?.[0]); return; }
   if (target.matches('[data-import-sheet]')) { await readImportFile(state.importFile, target.value); return; }
-  if (target.matches('[data-calc]')) { state.calculator[target.dataset.calc] = target.value; render(); }
+  if (target.matches('[data-calc]')) {
+    state.calculator[target.dataset.calc] = target.value;
+    updateCalculatorPreview();
+  }
+}
+
+function updateCalculatorPreview() {
+  const output = document.querySelector('[data-calc-output="sale"]');
+  if (!output) return;
+
+  const values = calculatorValues(state.calculator);
+  const fmt = (value) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 3 }).format(value);
+  const outputs = {
+    'price-list': integer(values.unit || 0),
+    pxl: `${fmt(values.pxl)} cm`,
+    nl: `${fmt(values.nl)} cm`,
+    'paper-width': values.valid ? `${fmt(values.paperWidth)} cm` : 'Tidak tersedia',
+    base: values.valid ? rupiah(values.base) : '—',
+    adjusted: values.valid ? rupiah(values.discounted) : '—',
+    'before-tax': values.valid ? rupiah(values.beforeTax) : '—',
+    sale: values.valid ? rupiah(values.sale) : '—',
+  };
+  for (const [key, value] of Object.entries(outputs)) {
+    const element = document.querySelector(`[data-calc-output="${key}"]`);
+    if (element) element.textContent = value;
+  }
+
+  const warning = document.querySelector('[data-calc-warning]');
+  if (warning) warning.hidden = values.valid;
+  const usePriceButton = document.querySelector('[data-act="use-price"]');
+  if (usePriceButton) {
+    usePriceButton.dataset.price = values.valid ? String(Math.round(values.sale)) : '0';
+    usePriceButton.disabled = !values.valid;
+  }
 }
 
 async function handleSubmit(event) {
