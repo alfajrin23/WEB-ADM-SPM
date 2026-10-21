@@ -1324,7 +1324,7 @@ function updateCalculatorPreview() {
     'paper-width': values.valid ? `${fmt(values.paperWidth)} cm` : 'Tidak tersedia',
     base: values.valid ? rupiah(values.base) : '—',
     adjusted: values.valid ? rupiah(values.discounted) : '—',
-    'before-tax': values.valid ? rupiah(values.beforeTax) : '—',
+    'after-tax': values.valid ? rupiah(values.afterTax) : '—',
     sale: values.valid ? rupiah(values.sale) : '—',
   };
   for (const [key, value] of Object.entries(outputs)) {
