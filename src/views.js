@@ -590,11 +590,10 @@ export function calculatorValues(calc) {
   const pxl = (p + l) * 2 + 4;
   const nl = l + 0.6 + t;
   const paperWidthFor = (width) => {
-    const roundedWidth = Math.max(100, Math.ceil((width - 1e-9) / 5) * 5);
-    const hasFractionalCentimeter = Math.abs(width - Math.round(width)) > 1e-9;
-    return roundedWidth + (hasFractionalCentimeter ? 5 : 0);
+    const widthWithEdgeAllowance = width + 2;
+    return Math.max(100, Math.ceil((widthWithEdgeAllowance - 1e-9) / 5) * 5);
   };
-  let susun = nl > 0 ? Math.max(1, Math.ceil(100 / nl)) : 0;
+  let susun = nl > 0 ? Math.min(4, Math.max(1, Math.ceil(100 / nl))) : 0;
   if (susun > 1 && paperWidthFor(nl * susun) > 180) susun -= 1;
   const raw = nl * susun;
   const paperWidth = susun ? paperWidthFor(raw) : 0;
@@ -618,7 +617,7 @@ function calculator(state) {
       <div class="form-grid"><label class="field field-wide"><span>Substance</span><select data-calc="substance">${pricelist.map((item) => `<option value="${item[0]}" ${String(item[0]) === String(calc.substance) ? 'selected' : ''}>${esc(item[1].map((part) => part.replace(/\s+/g, '')).join(' / '))}</option>`).join('')}</select></label><label class="field"><span>Spec material</span><select data-calc="spec">${priceSpecs.map((spec) => `<option ${spec === calc.spec ? 'selected' : ''}>${esc(spec)}</option>`).join('')}</select></label><div class="field output-field"><span>Harga pricelist</span><strong data-calc-output="price-list">${integer(unit || 0)}</strong><small>Per kombinasi substance & spec</small></div></div>
       <div class="panel-divider"></div><div class="panel-heading"><div><p class="eyebrow">02 · UKURAN</p><h2>Ukuran karton</h2></div><span class="calc-step">cm</span></div>
       <div class="form-grid three-col">${[['panjang', 'Panjang'], ['lebar', 'Lebar'], ['tinggi', 'Tinggi']].map(([key, label]) => `<label class="field"><span>${label}</span><div class="input-unit"><input type="number" min="0" step="0.1" data-calc="${key}" value="${esc(calc[key])}"><b>cm</b></div></label>`).join('')}</div>
-      <div class="calc-derived"><div><small>P × L</small><strong data-calc-output="pxl">${fmt(pxl)} cm</strong></div><div><small>L + 0,6 + T</small><strong data-calc-output="nl">${fmt(nl)} cm</strong></div><div><small>Lebar kertas</small><strong data-calc-output="paper-width">${valid ? `${fmt(paperWidth)} cm` : 'Tidak tersedia'}</strong></div></div>
+      <div class="calc-derived"><div><small>P × L</small><strong data-calc-output="pxl">${fmt(pxl)} cm</strong></div><div><small>L + 0,6 + T</small><strong data-calc-output="nl">${fmt(nl)} cm</strong></div><div><small>Lebar kertas</small><strong data-calc-output="paper-width">${valid ? `${fmt(paperWidth)} cm` : 'Tidak tersedia'}</strong><small>Toleransi 1 cm tiap sisi</small></div></div>
       <div class="panel-divider"></div><div class="panel-heading"><div><p class="eyebrow">03 · HARGA JUAL</p><h2>Perhitungan harga</h2></div><span class="calc-step">otomatis</span></div>
       <div class="form-grid three-col"><div class="field output-field"><span>Harga dasar</span><strong data-calc-output="base">${valid ? money(base) : '—'}</strong><small>(Lebar kertas × P×L × pricelist ÷ 10.000) ÷ susun</small></div><label class="field"><span>Diskon</span><div class="input-unit"><input type="number" step="0.1" data-calc="diskon" value="${esc(calc.diskon)}"><b>%</b></div><small>Persentase dari harga nasional: 10% menaikkan, -10% menurunkan harga.</small></label><div class="field output-field"><span>Harga setelah penyesuaian</span><strong data-calc-output="adjusted">${valid ? money(discounted) : '—'}</strong></div><div class="field output-field"><span>Harga sebelum PPN</span><strong data-calc-output="before-tax">${valid ? money(beforeTax) : '—'}</strong><small>Harga setelah penyesuaian ÷ 1,11 untuk mengeluarkan PPN 11%</small></div><label class="field"><span>Margin</span><div class="input-unit"><input type="number" min="0" step="0.1" data-calc="margin" value="${esc(calc.margin)}"><b>%</b></div></label><div class="field sale-price"><span>Harga jual</span><strong data-calc-output="sale">${valid ? money(sale) : '—'}</strong><small>Harga sebelum PPN + margin</small></div></div>
       <div class="calculator-actions"><button class="button secondary" type="button" data-act="calculator-reset">${icon('refresh', 16)}<span>Reset contoh</span></button><button class="button secondary" type="button" data-act="toggle-pricelist">${icon('package', 16)}<span>${calc.showPricelist ? 'Sembunyikan' : 'Lihat'} pricelist</span></button>${state.calculatorTarget !== null ? `<button class="button primary" type="button" data-act="use-price" data-price="${valid ? Math.round(sale) : 0}" ${valid ? '' : 'disabled'}>${icon('check', 16)}<span>Gunakan harga ini</span></button>` : ''}</div>

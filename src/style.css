@@ -209,6 +209,7 @@ button:disabled { opacity: .52; cursor: wait; transform: none !important; }
 .admin-checks b { color: var(--ink); font: 500 .73rem 'DM Mono', monospace; white-space: nowrap; }
 .subtle-note, .form-hint { color: #849097; font-size: .7rem; line-height: 1.55; }
 .notice { display: flex; align-items: flex-start; gap: 9px; padding: 12px 14px; border: 1px solid; border-radius: 14px; font-size: .74rem; line-height: 1.55; }
+.notice[hidden] { display: none; }
 .notice svg { flex: 0 0 auto; margin-top: 1px; }
 .notice-warn { border-color: #ebd8b4; background: #fbf3e4; color: #795d2e; }
 .notice-info { border-color: #d4e0e8; background: #eff4f7; color: #49687f; }
