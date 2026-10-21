@@ -589,20 +589,23 @@ export function calculatorValues(calc) {
   const t = Number(calc.tinggi) || 0;
   const pxl = (p + l) * 2 + 4;
   const nl = l + 0.6 + t;
-  const susun = nl > 0 ? Math.max(1, Math.ceil(100 / nl)) : 0;
+  let susun = nl > 0 ? Math.max(1, Math.ceil(100 / nl)) : 0;
+  if (susun > 1 && Math.ceil((nl * susun) / 5) * 5 > 180) susun -= 1;
   const raw = nl * susun;
   const paperWidth = susun ? Math.max(100, Math.ceil(raw / 5) * 5) : 0;
-  const valid = susun > 0 && raw >= 100 && raw <= 180 && paperWidth <= 180;
+  const valid = susun > 0 && Number.isFinite(unit) && unit > 0
+    && Number.isFinite(pxl) && Number.isFinite(nl) && Number.isFinite(paperWidth);
+  const outsideStandardRange = valid && paperWidth > 180;
   const base = valid ? (paperWidth * pxl * unit / 10000) / susun : 0;
   const discounted = base + base * (Number(calc.diskon) || 0) / 100;
   const beforeTax = discounted * 0.89;
   const sale = beforeTax * (1 + Math.max(0, Number(calc.margin) || 0) / 100);
-  return { unit, pxl, nl, paperWidth, valid, base, discounted, beforeTax, sale };
+  return { unit, pxl, nl, paperWidth, valid, outsideStandardRange, base, discounted, beforeTax, sale };
 }
 
 function calculator(state) {
   const calc = state.calculator;
-  const { unit, pxl, nl, paperWidth, valid, base, discounted, beforeTax, sale } = calculatorValues(calc);
+  const { unit, pxl, nl, paperWidth, valid, outsideStandardRange, base, discounted, beforeTax, sale } = calculatorValues(calc);
   const fmt = (value) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: 3 }).format(value);
   const table = calc.showPricelist ? `<section class="panel pricelist-panel"><div class="panel-heading"><div><p class="eyebrow">REFERENSI</p><h2>Pricelist material</h2></div><div class="heading-actions"><span class="tag">${pricelist.length} spec</span><button class="button secondary" type="button" data-act="export" data-kind="pricelist">${icon('download', 16)}<span>Export CSV</span></button></div></div>${tableWrap(`<table><thead><tr><th>No</th><th>Fluting</th><th>Medium</th><th>Liner</th>${priceSpecs.map((spec) => `<th>${esc(spec)}</th>`).join('')}</tr></thead><tbody>${pricelist.map((item) => `<tr><td>${item[0]}</td>${item[1].map((label) => `<td>${esc(label)}</td>`).join('')}${item[2].map((value) => `<td class="numeric">${integer(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`)}</section>` : '';
   return `${pageHead('ALAT KERJA', 'Kalkulator pricelist', 'Hitung harga karton dari substance, spec material, ukuran, diskon, dan margin.')}
@@ -614,7 +617,7 @@ function calculator(state) {
       <div class="panel-divider"></div><div class="panel-heading"><div><p class="eyebrow">03 · HARGA JUAL</p><h2>Perhitungan harga</h2></div><span class="calc-step">otomatis</span></div>
       <div class="form-grid three-col"><div class="field output-field"><span>Harga dasar</span><strong data-calc-output="base">${valid ? money(base) : '—'}</strong><small>(Lebar kertas × P×L × pricelist ÷ 10.000) ÷ susun</small></div><label class="field"><span>Diskon</span><div class="input-unit"><input type="number" step="0.1" data-calc="diskon" value="${esc(calc.diskon)}"><b>%</b></div><small>Persentase dari harga nasional: 10% menaikkan, -10% menurunkan harga.</small></label><div class="field output-field"><span>Harga setelah penyesuaian</span><strong data-calc-output="adjusted">${valid ? money(discounted) : '—'}</strong></div><div class="field output-field"><span>Harga sebelum PPN</span><strong data-calc-output="before-tax">${valid ? money(beforeTax) : '—'}</strong><small>Harga setelah penyesuaian dikurangi 11%</small></div><label class="field"><span>Margin</span><div class="input-unit"><input type="number" min="0" step="0.1" data-calc="margin" value="${esc(calc.margin)}"><b>%</b></div></label><div class="field sale-price"><span>Harga jual</span><strong data-calc-output="sale">${valid ? money(sale) : '—'}</strong><small>Harga sebelum PPN + margin</small></div></div>
       <div class="calculator-actions"><button class="button secondary" type="button" data-act="calculator-reset">${icon('refresh', 16)}<span>Reset contoh</span></button><button class="button secondary" type="button" data-act="toggle-pricelist">${icon('package', 16)}<span>${calc.showPricelist ? 'Sembunyikan' : 'Lihat'} pricelist</span></button>${state.calculatorTarget !== null ? `<button class="button primary" type="button" data-act="use-price" data-price="${valid ? Math.round(sale) : 0}" ${valid ? '' : 'disabled'}>${icon('check', 16)}<span>Gunakan harga ini</span></button>` : ''}</div>
-      <div class="notice notice-warn" data-calc-warning ${valid ? 'hidden' : ''}>${icon('alert', 16)}<span>Kombinasi ukuran tidak menghasilkan lebar kertas pada rentang tabel 100–180 cm.</span></div>
+      <div class="notice notice-warn" data-calc-warning ${outsideStandardRange ? '' : 'hidden'}>${icon('alert', 16)}<span>Lebar kertas ${fmt(paperWidth)} cm berada di luar rentang standar 100–180 cm. Harga tetap dihitung sebagai estimasi berdasarkan pricelist.</span></div>
     </article></section>${table}`;
 }
 

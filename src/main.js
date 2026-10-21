@@ -1333,7 +1333,11 @@ function updateCalculatorPreview() {
   }
 
   const warning = document.querySelector('[data-calc-warning]');
-  if (warning) warning.hidden = values.valid;
+  if (warning) {
+    warning.hidden = !values.outsideStandardRange;
+    const message = warning.querySelector('span');
+    if (message) message.textContent = `Lebar kertas ${fmt(values.paperWidth)} cm berada di luar rentang standar 100–180 cm. Harga tetap dihitung sebagai estimasi berdasarkan pricelist.`;
+  }
   const usePriceButton = document.querySelector('[data-act="use-price"]');
   if (usePriceButton) {
     usePriceButton.dataset.price = values.valid ? String(Math.round(values.sale)) : '0';
