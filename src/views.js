@@ -589,10 +589,15 @@ export function calculatorValues(calc) {
   const t = Number(calc.tinggi) || 0;
   const pxl = (p + l) * 2 + 4;
   const nl = l + 0.6 + t;
+  const paperWidthFor = (width) => {
+    const roundedWidth = Math.max(100, Math.ceil((width - 1e-9) / 5) * 5);
+    const hasFractionalCentimeter = Math.abs(width - Math.round(width)) > 1e-9;
+    return roundedWidth + (hasFractionalCentimeter ? 5 : 0);
+  };
   let susun = nl > 0 ? Math.max(1, Math.ceil(100 / nl)) : 0;
-  if (susun > 1 && Math.ceil((nl * susun) / 5) * 5 > 180) susun -= 1;
+  if (susun > 1 && paperWidthFor(nl * susun) > 180) susun -= 1;
   const raw = nl * susun;
-  const paperWidth = susun ? Math.max(100, Math.ceil(raw / 5) * 5) : 0;
+  const paperWidth = susun ? paperWidthFor(raw) : 0;
   const valid = susun > 0 && Number.isFinite(unit) && unit > 0
     && Number.isFinite(pxl) && Number.isFinite(nl) && Number.isFinite(paperWidth);
   const outsideStandardRange = valid && paperWidth > 180;
