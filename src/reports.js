@@ -4,6 +4,7 @@ import {
 } from './helpers.js';
 
 const normalizeCategory = (value) => String(value ?? '').trim() || 'Tanpa kategori';
+export const isDeprecatedReportCategory = (value) => normalizeCategory(value).toLocaleLowerCase('id-ID') === 'cicilan';
 const amountOf = (value) => Number(value) || 0;
 const unique = (values) => [...new Set(values)];
 const numericCell = (value) => ({ __csvNumeric: true, value: Number(value) || 0 });
@@ -14,7 +15,7 @@ export function reportCategoryOptions(data) {
   return unique([
     ...CASH_CATEGORIES,
     ...(data.cashflow_transactions || []).map((row) => normalizeCategory(row.category)),
-  ]);
+  ]).filter((category) => !isDeprecatedReportCategory(category));
 }
 
 function currentMonth() {
@@ -131,8 +132,10 @@ function formatCompactMoney(value) {
 
 export function buildReport(data, state) {
   const period = /^\d{4}-\d{2}$/.test(state.reportMonth || '') ? state.reportMonth : currentMonth();
-  const categories = unique([...reportCategoryOptions(data), ...(state.reportCategoryKnownCategories || [])]);
-  const selected = new Set(state.reportCategories ?? categories);
+  const categories = unique([...reportCategoryOptions(data), ...(state.reportCategoryKnownCategories || [])])
+    .filter((category) => !isDeprecatedReportCategory(category));
+  const selected = new Set((state.reportCategories ?? categories)
+    .filter((category) => !isDeprecatedReportCategory(category)));
   const selectedRows = (data.cashflow_transactions || []).filter((row) => selected.has(normalizeCategory(row.category)));
   const periodCashflow = selectedRows.filter((row) => inPeriod(row.transaction_date, period));
   const cashflow = cashflowTotals(periodCashflow);

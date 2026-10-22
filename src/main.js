@@ -8,7 +8,7 @@ import {
   monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity, toNumber,
 } from './helpers.js';
 import { calculatorValues, pageTabs, renderPage, renderSignIn } from './views.js';
-import { downloadReportCsv, reportCategoryOptions } from './reports.js';
+import { downloadReportCsv, isDeprecatedReportCategory, reportCategoryOptions } from './reports.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
 import './style.css';
 
@@ -116,19 +116,28 @@ function syncReportCategoryPreferences() {
     } catch {
       state.reportCategoryPreferenceError = true;
     }
-    const known = Array.isArray(saved?.categories) ? saved.categories : [];
+    const known = Array.isArray(saved?.categories)
+      ? saved.categories.filter((category) => !isDeprecatedReportCategory(category)) : [];
+    const selected = Array.isArray(saved?.selected)
+      ? [...new Set(saved.selected.filter((category) => !isDeprecatedReportCategory(category)))] : null;
     state.reportCategoryStorageKey = key;
-    state.reportCategoryKnownCategories = [...new Set([...known, ...(Array.isArray(saved?.selected) ? saved.selected : []), ...options])];
-    state.reportCategories = Array.isArray(saved?.selected)
-      ? [...new Set([...saved.selected, ...options.filter((category) => !known.includes(category))])]
+    state.reportCategoryKnownCategories = [...new Set([...known, ...(selected || []), ...options])];
+    state.reportCategories = selected
+      ? [...new Set([...selected, ...options.filter((category) => !known.includes(category))])]
       : [...options];
     persistReportCategoryPreferences();
     return;
   }
-  const newCategories = options.filter((category) => !state.reportCategoryKnownCategories.includes(category));
-  if (newCategories.length) {
-    state.reportCategoryKnownCategories = [...state.reportCategoryKnownCategories, ...newCategories];
-    state.reportCategories = [...new Set([...(state.reportCategories || []), ...newCategories])];
+  const previousKnown = Array.isArray(state.reportCategoryKnownCategories) ? state.reportCategoryKnownCategories : [];
+  const previousSelected = Array.isArray(state.reportCategories) ? state.reportCategories : [];
+  const known = [...new Set(previousKnown.filter((category) => !isDeprecatedReportCategory(category)))];
+  const selected = [...new Set(previousSelected.filter((category) => !isDeprecatedReportCategory(category)))];
+  const newCategories = options.filter((category) => !known.includes(category));
+  state.reportCategoryKnownCategories = [...known, ...newCategories];
+  state.reportCategories = [...new Set([...selected, ...newCategories])];
+  if (newCategories.length
+    || JSON.stringify(known) !== JSON.stringify(previousKnown)
+    || JSON.stringify(selected) !== JSON.stringify(previousSelected)) {
     persistReportCategoryPreferences();
   }
 }
@@ -1124,7 +1133,11 @@ async function handleClick(event) {
     render(); return;
   }
   if (action === 'print-report') { window.print(); return; }
-  if (action === 'export-report') { downloadReportCsv(state.data, state); return; }
+  if (action === 'export-report') {
+    try { downloadReportCsv(state.data, state); }
+    catch (error) { toast(friendlyError(error), 'error'); }
+    return;
+  }
   if (action === 'select-month') { state.month = button.dataset.month; render(); return; }
   if (action === 'change-year') {
     const [year, month] = state.month.split('-').map(Number);
