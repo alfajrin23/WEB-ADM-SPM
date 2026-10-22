@@ -356,7 +356,7 @@ begin
   ) then
     alter table public.cashflow_transactions
       add constraint cashflow_supplier_bill_category_check
-      check (supplier_bill_id is null or (category = 'Cicilan' and kind = 'debit'));
+      check (supplier_bill_id is null or (category = 'Cicilan piutang' and kind = 'debit'));
   end if;
 
   if not exists (
@@ -763,7 +763,7 @@ begin
   insert into public.cashflow_transactions
     (owner_id, workspace_id, transaction_date, category, requester, description, amount, kind, source_key)
   values
-    (invoice_owner_id, new.workspace_id, coalesce(new.event_date, current_date), 'Cicilan',
+    (invoice_owner_id, new.workspace_id, coalesce(new.event_date, current_date), 'Uang Masuk',
       invoice_customer, format('Pembayaran invoice %s · %s', invoice_number, invoice_customer),
       -new.balance_delta, 'credit', 'customer-receivable-event:' || new.id::text)
   on conflict (workspace_id, source_key) do update
@@ -810,8 +810,8 @@ begin
     return new;
   end if;
 
-  if new.category <> 'Cicilan' or new.kind <> 'debit' then
-    raise exception 'Pembayaran piutang supplier harus memakai kategori Cicilan sebagai uang keluar.';
+  if new.category <> 'Cicilan piutang' or new.kind <> 'debit' then
+    raise exception 'Pembayaran piutang supplier harus memakai kategori Cicilan piutang sebagai uang keluar.';
   end if;
 
   select *
@@ -913,7 +913,7 @@ begin
   insert into public.cashflow_transactions
     (owner_id, workspace_id, transaction_date, category, requester, description, amount, kind, supplier_bill_id, source_key)
   values
-    (new.owner_id, new.workspace_id, new.entry_date, 'Cicilan', new.supplier, cashflow_description,
+    (new.owner_id, new.workspace_id, new.entry_date, 'Cicilan piutang', new.supplier, cashflow_description,
      new.amount, 'debit', new.linked_bill_id, 'supplier-ledger-payment:' || new.id::text)
   on conflict (workspace_id, source_key) do update
     set transaction_date = excluded.transaction_date,
