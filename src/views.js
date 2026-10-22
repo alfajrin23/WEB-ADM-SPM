@@ -683,12 +683,12 @@ function inputLogs(state) {
     return `<tr><td>${esc(profile.email || 'Email belum tersedia')}${isCurrentUser ? ' <span class="subtle-note">(akun Anda)</span>' : ''}</td><td><span class="role-pill role-${esc(profile.role)}">${profile.role === 'developer' ? 'Developer' : 'Staff'}</span></td><td><span class="status status-${assigned ? 'done' : 'pending'}">${assigned ? 'Aktif' : 'Menunggu akses'}</span></td><td>${isCurrentUser ? '—' : `<form class="role-form" data-form="workspace-role"><input type="hidden" name="user_id" value="${esc(profile.user_id)}"><select name="role" aria-label="Peran ${esc(profile.email)}"><option value="staff" ${profile.role === 'staff' ? 'selected' : ''}>Staff</option><option value="developer" ${profile.role === 'developer' ? 'selected' : ''}>Developer</option></select><button class="button secondary" type="submit" ${state.busy ? 'disabled' : ''}>Simpan</button></form>`}</td></tr>`;
   }).join('');
   return `${pageHead('AKSES DEVELOPER', 'Log Input', 'Telusuri siapa yang menambah, mengubah, atau menghapus data. Atur juga akses staff ke ruang kerja perusahaan.')}
+    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">AKUN RUANG KERJA</p><h2>Akses staff dan developer</h2><p>Akun baru harus ditautkan ke ruang kerja sebelum dapat membuka data perusahaan.</p></div></div>
+      ${users.length ? tableWrap(`<table><thead><tr><th>Email</th><th>Peran</th><th>Status akses</th><th>Atur peran</th></tr></thead><tbody>${users}</tbody></table>`) : emptyState('Belum ada akun lain', 'Akun yang mendaftar akan tercantum di sini.', '', '', 'users')}
+    </section>
     <div class="metric-grid log-metrics">${metrics.map(([label, value, glyph, tone]) => card(label, value, glyph, tone, `Periode ${esc(month)}`)).join('')}</div>
     <section class="panel"><div class="panel-heading"><div><p class="eyebrow">JEJAK PERUBAHAN</p><h2>Aktivitas data</h2><p>Log mengikuti periode pilihan. Maksimal 200 perubahan terbaru bulan ini dimuat.</p></div></div>
       ${logs.length ? tableWrap(`<table><thead><tr><th>Waktu</th><th>Akun</th><th>Aksi</th><th>Data</th><th>ID</th><th>Ringkasan perubahan</th></tr></thead><tbody>${logRows}</tbody></table>`) : emptyState('Belum ada input bulan ini', 'Perubahan data yang tersimpan akan muncul di sini.', '', '', 'file')}
-    </section>
-    <section class="panel"><div class="panel-heading"><div><p class="eyebrow">AKUN RUANG KERJA</p><h2>Akses staff dan developer</h2><p>Akun baru harus ditautkan ke ruang kerja sebelum dapat membuka data perusahaan.</p></div></div>
-      ${users.length ? tableWrap(`<table><thead><tr><th>Email</th><th>Peran</th><th>Status akses</th><th>Atur peran</th></tr></thead><tbody>${users}</tbody></table>`) : emptyState('Belum ada akun lain', 'Akun yang mendaftar akan tercantum di sini.', '', '', 'users')}
     </section>`;
 }
 
