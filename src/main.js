@@ -1335,6 +1335,7 @@ function updateCalculatorPreview() {
     'price-list': integer(values.unit || 0),
     pxl: `${fmt(values.pxl)} cm`,
     nl: `${fmt(values.nl)} cm`,
+    susun: values.susun ? `${values.susun}×` : '—',
     'paper-width': values.valid ? `${fmt(values.paperWidth)} cm` : 'Tidak tersedia',
     base: values.valid ? rupiah(values.base) : '—',
     adjusted: values.valid ? rupiah(values.discounted) : '—',
