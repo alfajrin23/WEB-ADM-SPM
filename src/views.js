@@ -6,8 +6,8 @@ import { priceSpecs, pricelist } from './pricelist-data.js';
 import { renderReport } from './reports.js';
 
 const money = (value) => rupiah(value);
-const CALCULATOR_VAT_DEDUCTION_PERCENT = 1.1;
-const CALCULATOR_VAT_DEDUCTION_RATE = CALCULATOR_VAT_DEDUCTION_PERCENT / 100;
+const CALCULATOR_VAT_PERCENT = 1.1;
+const CALCULATOR_VAT_FACTOR = 1 + CALCULATOR_VAT_PERCENT / 100;
 const smallButton = (label, action, attrs = '', glyph = 'edit', extra = '') =>
   `<button class="icon-button ${extra}" type="button" data-act="${action}" ${attrs} aria-label="${esc(label)}" title="${esc(label)}">${icon(glyph, 16)}</button>`;
 const actionButton = (label, action, attrs = '', glyph = 'plus', style = 'primary') =>
@@ -604,7 +604,7 @@ export function calculatorValues(calc) {
   const outsideStandardRange = valid && paperWidth > 180;
   const base = valid ? (paperWidth * pxl * unit / 10000) / susun : 0;
   const discounted = base + base * (Number(calc.diskon) || 0) / 100;
-  const beforeTax = discounted - discounted * CALCULATOR_VAT_DEDUCTION_RATE;
+  const beforeTax = discounted / CALCULATOR_VAT_FACTOR;
   const sale = beforeTax * (1 + Math.max(0, Number(calc.margin) || 0) / 100);
   return { unit, pxl, nl, paperWidth, valid, outsideStandardRange, base, discounted, beforeTax, sale };
 }
@@ -621,7 +621,7 @@ function calculator(state) {
       <div class="form-grid three-col">${[['panjang', 'Panjang'], ['lebar', 'Lebar'], ['tinggi', 'Tinggi']].map(([key, label]) => `<label class="field"><span>${label}</span><div class="input-unit"><input type="number" min="0" step="0.1" data-calc="${key}" value="${esc(calc[key])}"><b>cm</b></div></label>`).join('')}</div>
       <div class="calc-derived"><div><small>P × L</small><strong data-calc-output="pxl">${fmt(pxl)} cm</strong></div><div><small>L + 0,6 + T</small><strong data-calc-output="nl">${fmt(nl)} cm</strong></div><div><small>Lebar kertas</small><strong data-calc-output="paper-width">${valid ? `${fmt(paperWidth)} cm` : 'Tidak tersedia'}</strong><small>Toleransi 1 cm tiap sisi</small></div></div>
       <div class="panel-divider"></div><div class="panel-heading"><div><p class="eyebrow">03 · HARGA JUAL</p><h2>Perhitungan harga</h2></div><span class="calc-step">otomatis</span></div>
-      <div class="form-grid three-col"><div class="field output-field"><span>Harga dasar</span><strong data-calc-output="base">${valid ? money(base) : '—'}</strong><small>(Lebar kertas × P×L × pricelist ÷ 10.000) ÷ susun</small></div><label class="field"><span>Diskon</span><div class="input-unit"><input type="number" step="0.1" data-calc="diskon" value="${esc(calc.diskon)}"><b>%</b></div><small>Persentase dari harga nasional: 10% menaikkan, -10% menurunkan harga.</small></label><div class="field output-field"><span>Harga setelah penyesuaian</span><strong data-calc-output="adjusted">${valid ? money(discounted) : '—'}</strong></div><div class="field output-field"><span>Harga sebelum PPN</span><strong data-calc-output="before-tax">${valid ? money(beforeTax) : '—'}</strong><small>Harga setelah penyesuaian dikurangi PPN ${CALCULATOR_VAT_DEDUCTION_PERCENT}%.</small></div><label class="field"><span>Margin</span><div class="input-unit"><input type="number" min="0" step="0.1" data-calc="margin" value="${esc(calc.margin)}"><b>%</b></div></label><div class="field sale-price"><span>Harga jual</span><strong data-calc-output="sale">${valid ? money(sale) : '—'}</strong><small>Harga sebelum PPN + margin</small></div></div>
+      <div class="form-grid three-col"><div class="field output-field"><span>Harga dasar</span><strong data-calc-output="base">${valid ? money(base) : '—'}</strong><small>(Lebar kertas × P×L × pricelist ÷ 10.000) ÷ susun</small></div><label class="field"><span>Diskon</span><div class="input-unit"><input type="number" step="0.1" data-calc="diskon" value="${esc(calc.diskon)}"><b>%</b></div><small>Persentase dari harga nasional: 10% menaikkan, -10% menurunkan harga.</small></label><div class="field output-field"><span>Harga setelah penyesuaian</span><strong data-calc-output="adjusted">${valid ? money(discounted) : '—'}</strong></div><div class="field output-field"><span>Harga sebelum PPN</span><strong data-calc-output="before-tax">${valid ? money(beforeTax) : '—'}</strong><small>Harga setelah penyesuaian ÷ ${CALCULATOR_VAT_FACTOR.toLocaleString('id-ID')} (PPN ${CALCULATOR_VAT_PERCENT}%).</small></div><label class="field"><span>Margin</span><div class="input-unit"><input type="number" min="0" step="0.1" data-calc="margin" value="${esc(calc.margin)}"><b>%</b></div></label><div class="field sale-price"><span>Harga jual</span><strong data-calc-output="sale">${valid ? money(sale) : '—'}</strong><small>Harga sebelum PPN + margin</small></div></div>
       <div class="calculator-actions"><button class="button secondary" type="button" data-act="calculator-reset">${icon('refresh', 16)}<span>Reset contoh</span></button><button class="button secondary" type="button" data-act="toggle-pricelist">${icon('package', 16)}<span>${calc.showPricelist ? 'Sembunyikan' : 'Lihat'} pricelist</span></button>${state.calculatorTarget !== null ? `<button class="button primary" type="button" data-act="use-price" data-price="${valid ? Math.round(sale) : 0}" ${valid ? '' : 'disabled'}>${icon('check', 16)}<span>Gunakan harga ini</span></button>` : ''}</div>
       <div class="notice notice-warn" data-calc-warning ${outsideStandardRange ? '' : 'hidden'}>${icon('alert', 16)}<span>Lebar kertas ${fmt(paperWidth)} cm berada di luar rentang standar 100–180 cm. Harga tetap dihitung sebagai estimasi berdasarkan pricelist.</span></div>
     </article></section>${table}`;
