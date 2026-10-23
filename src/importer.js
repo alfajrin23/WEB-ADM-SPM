@@ -1,4 +1,4 @@
-import { normalizeCashCategory, SUPPLIER_DEBT_CASH_CATEGORY, toNumber } from './helpers.js';
+import { toNumber } from './helpers.js';
 
 const clean = (value) => String(value ?? '').trim();
 const norm = (value) => clean(value).toLocaleUpperCase('id-ID').replace(/\s+/g, ' ');
@@ -209,7 +209,6 @@ function parseInvoices(rows, headerIndex, rowOffset, file, sheetName) {
 function categoryName(raw) {
   const value = clean(raw);
   const key = value.toLocaleLowerCase('id-ID');
-  if (['cicilan piutang', 'cicilan hutang supplier', 'cicilan hutang'].includes(key)) return SUPPLIER_DEBT_CASH_CATEGORY;
   if (key.includes('dana talang')) return 'Dana Talang';
   if (key === 'uang masuk' || key.includes('transfer masuk')) return 'Uang Masuk';
   if (key.includes('admin')) return 'Admin';
@@ -225,7 +224,7 @@ function categoryName(raw) {
   if (key.includes('fee market')) return 'Fee Market';
   if (key.includes('perawatan')) return 'Perawatan';
   if (key.includes('sewa')) return 'Sewa Gudang';
-  return value ? normalizeCashCategory(value) : 'Lainnya';
+  return value || 'Lainnya';
 }
 
 function parseCashflow(rows, headerIndex, rowOffset, file, sheetName) {

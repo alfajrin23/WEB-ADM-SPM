@@ -642,7 +642,7 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .report-breakdown-card > span { color: #78858b; font-size: .67rem; font-weight: 800; line-height: 1.35; }
 .report-breakdown-card > strong { color: var(--ink); font: 700 clamp(.85rem, 1.1vw, 1rem)/1.25 'DM Mono', monospace; overflow-wrap: anywhere; }
 .report-breakdown-card > small { color: #879399; font-size: .64rem; line-height: 1.45; }
-.report-supplier-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.report-supplier-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .report-debt-card { display: grid; min-width: 0; align-content: start; gap: 9px; padding: 13px 14px; border: 1px solid #ebe7dd; border-top: 3px solid var(--blue); border-radius: 15px 15px 15px 6px; background: #fffefa; }
 .report-debt-card.tone-green { border-top-color: var(--green); }
 .report-debt-card > span { color: #78858b; font-size: .67rem; font-weight: 800; line-height: 1.35; }

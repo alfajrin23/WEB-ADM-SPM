@@ -1,6 +1,6 @@
 import {
   CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, icon, integer,
-  inMonth, monthName, normalizeCashCategory, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity,
+  inMonth, monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity,
 } from './helpers.js';
 import { priceSpecs, pricelist } from './pricelist-data.js';
 import { renderReport } from './reports.js';
@@ -239,7 +239,7 @@ function cashCategoryCards(data, month) {
   }]));
 
   cash.forEach((row) => {
-    const category = normalizeCashCategory(row.category);
+    const category = String(row.category || '').trim() || 'Lainnya';
     const key = category.toLocaleLowerCase('id-ID');
     const group = groups.get(key) || { category, incoming: 0, outgoing: 0, incomingCount: 0, outgoingCount: 0 };
     if (row.kind === 'credit') {
@@ -365,15 +365,14 @@ function cashflow(data, state) {
     if (!settings.opening_balance_date || row.transaction_date >= settings.opening_balance_date) running += (row.kind === 'credit' ? 1 : -1) * Number(row.amount || 0);
     balanceMap.set(row.id, running);
   }
-  const selectedCategory = state.category ? normalizeCashCategory(state.category) : '';
-  const filtered = all.filter((row) => inMonth(row.transaction_date, month) && (!selectedCategory || normalizeCashCategory(row.category) === selectedCategory) && (!state.search || `${normalizeCashCategory(row.category)} ${row.requester} ${row.description}`.toLowerCase().includes(state.search.toLowerCase())));
-  const summaryTransactions = all.filter((row) => inMonth(row.transaction_date, month) && (!state.search || `${normalizeCashCategory(row.category)} ${row.requester} ${row.description}`.toLowerCase().includes(state.search.toLowerCase())));
+  const filtered = all.filter((row) => inMonth(row.transaction_date, month) && (!state.category || row.category === state.category) && (!state.search || `${row.category} ${row.requester} ${row.description}`.toLowerCase().includes(state.search.toLowerCase())));
+  const summaryTransactions = all.filter((row) => inMonth(row.transaction_date, month) && (!state.search || `${row.category} ${row.requester} ${row.description}`.toLowerCase().includes(state.search.toLowerCase())));
   const credit = filtered.filter((row) => row.kind === 'credit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const debit = filtered.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const categories = [...new Set([...CASH_CATEGORIES, ...data.cashflow_transactions.map((row) => normalizeCashCategory(row.category))])];
+  const categories = [...new Set([...CASH_CATEGORIES, ...data.cashflow_transactions.map((row) => row.category)])];
   const categoryTotals = new Map();
   for (const row of summaryTransactions) {
-    const category = normalizeCashCategory(row.category);
+    const category = row.category || 'Lainnya';
     const totals = categoryTotals.get(category) || { category, credit: 0, debit: 0 };
     totals[row.kind === 'credit' ? 'credit' : 'debit'] += Number(row.amount || 0);
     categoryTotals.set(category, totals);
@@ -381,12 +380,12 @@ function cashflow(data, state) {
   const categorySummary = [...categoryTotals.values()].filter((row) => row.credit + row.debit > 0).sort((a, b) => (b.credit + b.debit) - (a.credit + a.debit));
   const summaryCredit = summaryTransactions.filter((row) => row.kind === 'credit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const summaryDebit = summaryTransactions.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  const categoryPills = `<article class="cash-category-card cash-category-total cash-category-expense"><span class="cash-category-label">TOTAL UANG KELUAR</span><strong>${money(summaryDebit)}</strong><small>${integer(summaryTransactions.filter((row) => row.kind === 'debit').length)} transaksi pada periode ini</small></article><article class="cash-category-card cash-category-total cash-category-income"><span class="cash-category-label">TOTAL UANG MASUK</span><strong>${money(summaryCredit)}</strong><small>${integer(summaryTransactions.filter((row) => row.kind === 'credit').length)} transaksi pada periode ini</small></article>${categorySummary.map(({ category, credit: incoming, debit: outgoing }, index) => `<button type="button" class="cash-category-card ${selectedCategory === category ? 'selected' : ''}" data-act="filter-category" data-category="${esc(category)}"><span class="cash-category-label cash-tone-${index % 8}">${esc(category)}</span><span class="cash-category-values">${incoming > 0 ? `<span><small>Uang masuk</small><strong>${money(incoming)}</strong></span>` : ''}${outgoing > 0 ? `<span><small>Uang keluar</small><strong>${money(outgoing)}</strong></span>` : ''}</span></button>`).join('')}`;
+  const categoryPills = `<article class="cash-category-card cash-category-total cash-category-expense"><span class="cash-category-label">TOTAL UANG KELUAR</span><strong>${money(summaryDebit)}</strong><small>${integer(summaryTransactions.filter((row) => row.kind === 'debit').length)} transaksi pada periode ini</small></article><article class="cash-category-card cash-category-total cash-category-income"><span class="cash-category-label">TOTAL UANG MASUK</span><strong>${money(summaryCredit)}</strong><small>${integer(summaryTransactions.filter((row) => row.kind === 'credit').length)} transaksi pada periode ini</small></article>${categorySummary.map(({ category, credit: incoming, debit: outgoing }, index) => `<button type="button" class="cash-category-card ${state.category === category ? 'selected' : ''}" data-act="filter-category" data-category="${esc(category)}"><span class="cash-category-label cash-tone-${index % 8}">${esc(category)}</span><span class="cash-category-values">${incoming > 0 ? `<span><small>Uang masuk</small><strong>${money(incoming)}</strong></span>` : ''}${outgoing > 0 ? `<span><small>Uang keluar</small><strong>${money(outgoing)}</strong></span>` : ''}</span></button>`).join('')}`;
   const groups = new Map();
   filtered.forEach((row) => { const key = String(row.transaction_date || '').slice(0, 7) || 'tanpa tanggal'; groups.set(key, [...(groups.get(key) || []), row]); });
   const tableRows = [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([period, entries]) => {
     const periodDebit = entries.filter((row) => row.kind === 'debit').reduce((sum, row) => sum + Number(row.amount || 0), 0);
-    const rows = [...entries].sort((a, b) => (a.transaction_date || '').localeCompare(b.transaction_date || '')).map((row) => `<tr data-row-id="${row.id}"><td>${formatDate(row.transaction_date)}</td><td><span class="tag">${esc(normalizeCashCategory(row.category))}</span></td><td>${esc(row.requester || '—')}</td><td>${esc(row.description || '—')}</td><td class="numeric ${row.kind === 'debit' ? 'debit' : ''}">${row.kind === 'debit' ? money(row.amount) : '—'}</td><td class="numeric credit">${row.kind === 'credit' ? money(row.amount) : '—'}</td><td class="numeric">${money(balanceMap.get(row.id))}</td><td class="row-actions">${smallButton('Edit transaksi', 'edit', `data-table="cashflow_transactions" data-id="${row.id}"`)}${smallButton('Hapus transaksi', 'delete', `data-table="cashflow_transactions" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`).join('');
+    const rows = [...entries].sort((a, b) => (a.transaction_date || '').localeCompare(b.transaction_date || '')).map((row) => `<tr data-row-id="${row.id}"><td>${formatDate(row.transaction_date)}</td><td><span class="tag">${esc(row.category)}</span></td><td>${esc(row.requester || '—')}</td><td>${esc(row.description || '—')}</td><td class="numeric ${row.kind === 'debit' ? 'debit' : ''}">${row.kind === 'debit' ? money(row.amount) : '—'}</td><td class="numeric credit">${row.kind === 'credit' ? money(row.amount) : '—'}</td><td class="numeric">${money(balanceMap.get(row.id))}</td><td class="row-actions">${smallButton('Edit transaksi', 'edit', `data-table="cashflow_transactions" data-id="${row.id}"`)}${smallButton('Hapus transaksi', 'delete', `data-table="cashflow_transactions" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`).join('');
     return `${rows}<tr class="total-row"><td colspan="4">Total pengeluaran ${esc(period === 'tanpa tanggal' ? '' : monthName(period))}</td><td class="numeric">${money(periodDebit)}</td><td colspan="3"></td></tr>`;
   }).join('');
   const endBalance = Number(settings.opening_balance || 0) + all.filter((row) => !settings.opening_balance_date || row.transaction_date >= settings.opening_balance_date).reduce((sum, row) => sum + (row.kind === 'credit' ? 1 : -1) * Number(row.amount || 0), 0);
@@ -396,7 +395,7 @@ function cashflow(data, state) {
     <div class="summary-grid">${statStrip('Saldo berjalan', money(endBalance))}${statStrip('Uang masuk', money(credit))}${statStrip('Uang keluar', money(debit))}${statStrip('Transaksi periode ini', integer(filtered.length))}</div>
     <section class="panel"><div class="panel-heading"><div><p class="eyebrow">KATEGORI</p><h2>Ringkas berdasarkan kategori</h2><p>Uang masuk dan keluar per kategori · ${esc(monthName(month))}</p></div>${icon('filter', 20)}</div><div class="cash-category-grid">${categoryPills}</div></section>
     <section class="panel"><div class="panel-heading"><div><p class="eyebrow">BUKU KAS</p><h2>Rincian transaksi</h2></div>${actionButton('Export CSV', 'export', 'data-kind="cashflow"', 'download', 'secondary')}</div>
-      <div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari transaksi" data-filter="search" value="${esc(state.search)}" placeholder="Cari pengajuan atau keterangan"></label><select class="select-compact" data-filter="cashCategory"><option value="">Semua kategori</option>${categories.map((category) => `<option value="${esc(category)}" ${category === selectedCategory ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></div>
+      <div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari transaksi" data-filter="search" value="${esc(state.search)}" placeholder="Cari pengajuan atau keterangan"></label><select class="select-compact" data-filter="cashCategory"><option value="">Semua kategori</option>${categories.map((category) => `<option value="${esc(category)}" ${category === state.category ? 'selected' : ''}>${esc(category)}</option>`).join('')}</select></div>
       ${filtered.length ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Kategori</th><th>Pengaju</th><th>Keterangan</th><th class="numeric">Debit</th><th class="numeric">Kredit</th><th class="numeric">Saldo</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${tableRows}</tbody></table>`) : emptyState('Belum ada transaksi', 'Tambahkan transaksi pertama atau impor mutasi rekening BRI.', 'new-cashflow', 'Tambah transaksi', 'wallet')}
     </section>`;
 }

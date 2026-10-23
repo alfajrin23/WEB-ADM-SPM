@@ -1,10 +1,10 @@
 import {
   CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, icon, integer,
-  monthName, normalizeCashCategory, rupiah, SUPPLIER_DEBT_CASH_CATEGORY,
+  monthName, rupiah,
 } from './helpers.js';
 
-const normalizeCategory = (value) => String(value ?? '').trim() ? normalizeCashCategory(value) : 'Tanpa kategori';
-const displayCategory = (value) => normalizeCategory(value);
+const normalizeCategory = (value) => String(value ?? '').trim() || 'Tanpa kategori';
+const displayCategory = (value) => normalizeCategory(value) === 'Cicilan piutang' ? 'Cicilan hutang supplier' : normalizeCategory(value);
 export const isDeprecatedReportCategory = (value) => normalizeCategory(value).toLocaleLowerCase('id-ID') === 'cicilan';
 const amountOf = (value) => Number(value) || 0;
 const unique = (values) => [...new Set(values)];
@@ -17,23 +17,6 @@ export function reportCategoryOptions(data) {
     ...CASH_CATEGORIES,
     ...(data.cashflow_transactions || []).map((row) => normalizeCategory(row.category)),
   ]).filter((category) => !isDeprecatedReportCategory(category));
-}
-
-const supplierKey = (value) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
-const supplierDebtReference = (value) => String(value ?? '').toLocaleLowerCase('id-ID').replace(/[^a-z0-9]/g, '');
-
-function matchSupplierBill(payment, bills) {
-  const key = supplierKey(payment.supplier || payment.requester);
-  const reference = supplierDebtReference(payment.description);
-  if (!key || reference.length < 6) return null;
-  const supplierBills = bills.filter((bill) => supplierKey(bill.supplier) === key);
-  const exact = supplierBills.filter((bill) => supplierDebtReference(bill.description) === reference);
-  if (exact.length === 1) return exact[0];
-  const partial = supplierBills.filter((bill) => {
-    const billReference = supplierDebtReference(bill.description);
-    return billReference.length >= 6 && (reference.includes(billReference) || billReference.includes(reference));
-  });
-  return partial.length === 1 ? partial[0] : null;
 }
 
 function currentMonth() {
@@ -245,49 +228,29 @@ export function buildReport(data, state) {
   const supplierAdjustmentsThroughPeriod = supplierDebtAdjustments.filter((row) => String(row.entry_date || '').slice(0, 10) <= periodEnd);
   const supplierAdjustmentsInPeriod = supplierAdjustmentsThroughPeriod.filter((row) => inPeriod(row.entry_date, period));
   const supplierBillsInPeriod = sum(supplierRows.filter((row) => row.entry_type === 'bill'), (row) => amountOf(row.amount));
-  const supplierBillsById = new Map(supplierBillRows
+  const supplierPayments = sum(supplierRows.filter((row) => row.entry_type === 'payment'), (row) => amountOf(row.amount));
+  const supplierBillsById = new Map(supplierEntries
+    .filter((row) => row.entry_type === 'bill')
     .map((row) => [String(row.id), row]));
-  const ledgerPaymentsThroughPeriod = supplierScopeRows.filter((row) => row.entry_type === 'payment');
-  const linkedCashflowIds = new Set(ledgerPaymentsThroughPeriod
-    .filter((row) => row.cashflow_transaction_id)
-    .map((row) => String(row.cashflow_transaction_id)));
-  const cashflowDebtPaymentsThroughPeriod = (data.cashflow_transactions || [])
-    .filter((row) => row.kind === 'debit'
-      && normalizeCashCategory(row.category) === SUPPLIER_DEBT_CASH_CATEGORY
-      && String(row.transaction_date || '').slice(0, 10) <= periodEnd
-      && !linkedCashflowIds.has(String(row.id)))
-    .map((row) => ({
-      ...row,
-      entry_date: row.transaction_date,
-      entry_type: 'payment',
-      supplier: row.requester || '',
-      linked_bill_id: row.supplier_bill_id || null,
-      source: 'cashflow',
-    }));
-  const decorateSupplierPayment = (row) => {
-    const linkedBill = supplierBillsById.get(String(row.linked_bill_id || ''))
-      || (row.source === 'cashflow' ? matchSupplierBill(row, supplierBillRows) : null)
-      || null;
-    const allocation = !linkedBill
-      ? 'unallocated'
-      : String(linkedBill.entry_date || '').slice(0, 10) >= NEW_SUPPLIER_START ? 'new' : 'old';
-    return { ...row, linkedBill, allocation };
-  };
-  const supplierPaymentsThroughPeriod = [
-    ...ledgerPaymentsThroughPeriod,
-    ...cashflowDebtPaymentsThroughPeriod,
-  ].map(decorateSupplierPayment);
-  const supplierPaymentRows = supplierPaymentsThroughPeriod.filter((row) => inPeriod(row.entry_date, period));
-  const supplierPayments = sum(supplierPaymentRows, (row) => amountOf(row.amount));
+  const supplierPaymentsThroughPeriod = supplierScopeRows.filter((row) => row.entry_type === 'payment');
   const supplierLinkedPaymentsByBill = new Map();
   supplierPaymentsThroughPeriod.forEach((row) => {
-    if (!row.linkedBill) return;
-    const key = String(row.linkedBill.id);
+    if (!row.linked_bill_id) return;
+    const key = String(row.linked_bill_id);
     supplierLinkedPaymentsByBill.set(key, (supplierLinkedPaymentsByBill.get(key) || 0) + amountOf(row.amount));
   });
+  const supplierPaymentRows = supplierRows
+    .filter((row) => row.entry_type === 'payment')
+    .map((row) => {
+      const linkedBill = supplierBillsById.get(String(row.linked_bill_id || '')) || null;
+      const allocation = !linkedBill
+        ? 'unallocated'
+        : String(linkedBill.entry_date || '').slice(0, 10) >= NEW_SUPPLIER_START ? 'new' : 'old';
+      return { ...row, linkedBill, allocation };
+    });
   const supplierPaymentsToNewBills = sum(supplierPaymentRows.filter((row) => row.allocation === 'new'), (row) => amountOf(row.amount));
   const supplierPaymentsToOldBills = sum(supplierPaymentRows.filter((row) => row.allocation === 'old'), (row) => amountOf(row.amount));
-  const supplierUnallocatedPaymentsThroughPeriod = sum(supplierPaymentsThroughPeriod.filter((row) => row.allocation === 'unallocated'), (row) => amountOf(row.amount));
+  const supplierUnallocatedPaymentsThroughPeriod = sum(supplierPaymentsThroughPeriod.filter((row) => row.entry_type === 'payment' && !supplierBillsById.has(String(row.linked_bill_id || ''))), (row) => amountOf(row.amount));
   const supplierOutstandingForRow = (row) => Math.max(
     amountOf(row.amount) - (supplierLinkedPaymentsByBill.get(String(row.id)) || 0), 0,
   );
@@ -494,7 +457,7 @@ function reportIncomePlanPanel(report, state, plan = reportPlanView(report, stat
 
 function reportSupplierPanel(report) {
   const allocationLabels = { new: 'Hutang baru', old: 'Hutang lama', unallocated: 'Belum dialokasikan' };
-  const paymentRows = report.supplierPaymentRows.map((row) => `<tr><td>${esc(row.supplier || '—')}</td><td>${formatDate(row.entry_date)}</td><td>${formatDate(row.linkedBill?.entry_date)}</td><td>${allocationLabels[row.allocation]}</td><td>${esc(row.description || '—')}</td><td class="numeric">${esc(rupiah(row.amount))}</td></tr>`).join('');
+  const paymentRows = report.supplierPaymentRows.map((row) => `<tr><td>${esc(row.supplier)}</td><td>${formatDate(row.entry_date)}</td><td>${formatDate(row.linkedBill?.entry_date)}</td><td>${allocationLabels[row.allocation]}</td><td>${esc(row.description || '—')}</td><td class="numeric">${esc(rupiah(row.amount))}</td></tr>`).join('');
   const paymentDetails = paymentRows
     ? `<details class="report-history-details"><summary>Riwayat pembayaran hutang pada ${esc(report.periodName)} (${integer(report.supplierPaymentRows.length)})</summary><div class="table-wrap"><table><thead><tr><th>Supplier</th><th>Tanggal bayar</th><th>Tanggal tagihan</th><th>Kelompok</th><th>Keterangan</th><th class="numeric">Dibayar</th></tr></thead><tbody>${paymentRows}</tbody></table></div></details>`
     : `<p class="report-source-note">Tidak ada pembayaran hutang supplier tercatat pada ${esc(report.periodName)}.</p>`;
@@ -504,9 +467,7 @@ function reportSupplierPanel(report) {
   const newCaption = `${integer(report.supplierNewBillRows.length)} tagihan sampai akhir ${report.periodName}.`;
   const newPaymentCount = report.supplierPaymentRows.filter((row) => row.allocation === 'new').length;
   const oldPaymentCount = report.supplierPaymentRows.filter((row) => row.allocation === 'old').length;
-  const unallocatedPaymentTotal = sum(report.supplierPaymentRows.filter((row) => row.allocation === 'unallocated'), (row) => amountOf(row.amount));
-  const totalPaymentCaption = `${integer(report.supplierPaymentRows.length)} pembayaran dari menu Hutang dan cashflow${unallocatedPaymentTotal > 0 ? ` · ${rupiah(unallocatedPaymentTotal)} belum tertaut ke tagihan` : ''}.`;
-  return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">HUTANG SUPPLIER</p><h2 id="report-supplier-title">Hutang supplier</h2><p>Nilai tagihan supplier dibagi menjadi hutang lama sebelum 1 Okt 2026 dan hutang baru mulai 1 Okt 2026. Pembayaran bulan ${esc(report.periodName)} dirinci menurut tagihan yang dilunasi.</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportDebtSummaryCard('Total hutang lama', oldBillTotal, report.supplierOldPaidThroughPeriod, report.supplierOldOutstanding, oldCaption, 'blue')}${reportDebtSummaryCard('Total hutang baru · mulai 1 Okt 2026', newBillTotal, report.supplierNewPaidThroughPeriod, report.supplierNewOutstanding, newCaption, 'green')}${reportBreakdownCard(`Total pembayaran hutang · ${report.periodName}`, rupiah(report.supplierPayments), totalPaymentCaption, 'blue')}${reportBreakdownCard(`Pembayaran hutang baru · ${report.periodName}`, rupiah(report.supplierPaymentsToNewBills), `${integer(newPaymentCount)} pembayaran untuk tagihan mulai 1 Okt 2026.`, 'gold')}${reportBreakdownCard(`Pembayaran hutang lama · ${report.periodName}`, rupiah(report.supplierPaymentsToOldBills), `${integer(oldPaymentCount)} pembayaran untuk tagihan sebelum 1 Okt 2026.`, 'violet')}</div>${paymentDetails}<p class="report-source-note">Koreksi total hutang tercatat pada tanggal perubahan dan dialokasikan proporsional ke sisa hutang lama dan baru. Pembayaran kategori Cicilan hutang dari cashflow dihitung satu kali; yang belum tertaut ke tagihan masuk total pembayaran, tetapi belum mengurangi sisa tagihan lama atau baru. Sumber: menu Hutang, cashflow, dan catatan koreksi supplier.</p></section>`;
+  return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">HUTANG SUPPLIER</p><h2 id="report-supplier-title">Hutang supplier</h2><p>Nilai tagihan supplier dibagi menjadi hutang lama sebelum 1 Okt 2026 dan hutang baru mulai 1 Okt 2026. Pembayaran bulan ${esc(report.periodName)} dirinci menurut tagihan yang dilunasi.</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportDebtSummaryCard('Total hutang lama', oldBillTotal, report.supplierOldPaidThroughPeriod, report.supplierOldOutstanding, oldCaption, 'blue')}${reportDebtSummaryCard('Total hutang baru · mulai 1 Okt 2026', newBillTotal, report.supplierNewPaidThroughPeriod, report.supplierNewOutstanding, newCaption, 'green')}${reportBreakdownCard(`Pembayaran hutang baru · ${report.periodName}`, rupiah(report.supplierPaymentsToNewBills), `${integer(newPaymentCount)} pembayaran untuk tagihan mulai 1 Okt 2026.`, 'gold')}${reportBreakdownCard(`Pembayaran hutang lama · ${report.periodName}`, rupiah(report.supplierPaymentsToOldBills), `${integer(oldPaymentCount)} pembayaran untuk tagihan sebelum 1 Okt 2026.`, 'violet')}</div>${paymentDetails}<p class="report-source-note">Koreksi total hutang tercatat pada tanggal perubahan dan dialokasikan proporsional ke sisa hutang lama dan baru. Total dibayar dan sisa dihitung sampai akhir ${esc(report.periodName)}. Sumber: menu Hutang dan catatan koreksi supplier.</p></section>`;
 }
 
 function reportCSV(report, state) {
@@ -541,7 +502,7 @@ function reportCSV(report, state) {
     ['Hutang supplier', `Pembayaran hutang lama · ${report.periodName}`, numericCell(report.supplierPaymentsToOldBills), 'Dikelompokkan menurut tanggal tagihan yang dibayar.'],
     ['Hutang supplier', `Tagihan supplier · ${report.periodName}`, numericCell(report.supplierBillsInPeriod), 'entry_type=bill pada bulan laporan.'],
     ['Hutang supplier', `Koreksi total hutang · ${report.periodName}`, numericCell(sum(report.supplierAdjustmentsInPeriod, (row) => amountOf(row.amount))), 'Koreksi hutang yang dicatat pada bulan laporan; dialokasikan proporsional ke sisa hutang lama dan baru.'],
-    ['Hutang supplier', `Pembayaran hutang · ${report.periodName}`, numericCell(report.supplierPayments), 'Total pembayaran buku hutang dan transaksi cashflow kategori Cicilan hutang; baris cashflow tertaut dihitung satu kali.'],
+    ['Hutang supplier', `Pembayaran supplier · ${report.periodName}`, numericCell(report.supplierPayments), 'entry_type=payment pada bulan laporan.'],
     ['Hutang supplier', 'Pembayaran belum dialokasikan sampai akhir periode', numericCell(report.supplierUnallocatedPaymentsThroughPeriod), 'Pembayaran tanpa tautan tagihan yang valid.'],
   ];
   if (report.supplierPaymentRows.length) {
