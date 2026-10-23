@@ -446,11 +446,11 @@ function payables(data, state) {
     const paymentAction = supplier.balance > 0
       ? actionButton('Bayar', 'new-supplier-payment', `data-supplier="${esc(supplier.name)}"`, 'wallet', 'secondary')
       : '<span class="supplier-paid-badge">Lunas</span>';
-    return `<article class="supplier-card"><div class="supplier-card-head"><div><span class="eyebrow">SUPPLIER</span><h3>${esc(supplier.name)}</h3></div><div class="supplier-balance-pair"><div class="supplier-balance"><small>Total piutang</small><strong>${money(supplier.billed)}</strong></div><div class="supplier-balance outstanding"><small>Sisa</small><strong>${money(supplier.balance)}</strong></div></div></div><div class="supplier-card-meta"><span>Sudah dibayar ${money(supplier.paid)}</span><span>${supplier.rows.length} catatan</span></div><div class="supplier-card-actions">${paymentAction}<button type="button" class="text-button" aria-expanded="${expanded}" data-act="toggle-supplier" data-supplier="${esc(supplier.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup detail' : 'Detail pembayaran'}</button></div>${expanded ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="numeric">Tagihan</th><th class="numeric">Bayar</th><th class="numeric">Sisa</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
+    return `<article class="supplier-card"><div class="supplier-card-head"><div><span class="eyebrow">SUPPLIER</span><h3>${esc(supplier.name)}</h3></div><div class="supplier-balance-pair"><div class="supplier-balance"><small>Total hutang</small><strong>${money(supplier.billed)}</strong></div><div class="supplier-balance outstanding"><small>Sisa hutang</small><strong>${money(supplier.balance)}</strong></div></div></div><div class="supplier-card-meta"><span>Sudah dibayar ${money(supplier.paid)}</span><span>${supplier.rows.length} catatan</span></div><div class="supplier-card-actions">${paymentAction}<button type="button" class="text-button" aria-expanded="${expanded}" data-act="toggle-supplier" data-supplier="${esc(supplier.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup riwayat' : 'Riwayat pembayaran'}</button></div>${expanded ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="numeric">Tagihan</th><th class="numeric">Bayar</th><th class="numeric">Sisa</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
   }).join('');
-  return `${pageHead('KEUANGAN', 'Piutang pemasok', 'Catat tagihan dan pembayaran supplier untuk melihat total, pembayaran, serta sisa piutang.', `${actionButton('Export CSV', 'export', 'data-kind="supplier-ledger"', 'download', 'secondary')}${actionButton('Tagihan baru', 'new-supplier-bill', '', 'plus')}`)}
-    <div class="summary-grid">${statStrip('Total Piutang Outstanding', money(openTotal))}${statStrip('Jumlah Supplier Aktif', integer(open.length))}${statStrip('Supplier Sudah Lunas', integer(groups.filter((row) => row.billed > 0 && row.balance === 0).length))}</div>
-    <div class="supplier-list">${supplierCards || emptyState('Belum ada catatan supplier', 'Tambahkan tagihan pertama untuk mulai mencatat saldo dan pembayaran supplier.', 'new-supplier-bill', 'Tagihan baru', 'package')}</div>`;
+  return `${pageHead('KEUANGAN', 'Hutang supplier', 'Catat tagihan dan pembayaran supplier untuk melihat total hutang, pembayaran, serta sisa hutang.', `${actionButton('Export CSV', 'export', 'data-kind="supplier-ledger"', 'download', 'secondary')}${actionButton('Tagihan baru', 'new-supplier-bill', '', 'plus')}`)}
+    <div class="summary-grid">${statStrip('Total hutang outstanding', money(openTotal))}${statStrip('Jumlah supplier aktif', integer(open.length))}${statStrip('Supplier sudah lunas', integer(groups.filter((row) => row.billed > 0 && row.balance === 0).length))}</div>
+    <div class="supplier-list">${supplierCards || emptyState('Belum ada catatan supplier', 'Tambahkan tagihan pertama untuk mulai mencatat hutang dan pembayaran supplier.', 'new-supplier-bill', 'Tagihan baru', 'package')}</div>`;
 }
 
 function invoices(data, state) {
@@ -711,7 +711,7 @@ export function renderPage(tab, data, state) {
 
 export const pageTabs = [
   ['dashboard', 'Ringkasan', 'home'], ['cashflow', 'Cashflow', 'wallet'],
-  ['piutang', 'Piutang', 'users'], ['tagihan', 'Tagihan', 'file'],
+  ['piutang', 'Hutang', 'users'], ['tagihan', 'Tagihan', 'file'],
   ['produksi', 'Produksi', 'factory'], ['po-customer', 'PO Customer', 'package'],
   ['supplier', 'PO Supplier', 'package'],
   ['laporan', 'Laporan', 'file'],

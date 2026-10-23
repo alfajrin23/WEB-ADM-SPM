@@ -623,6 +623,16 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .report-metric-grid .report-metric-card:nth-child(2) { min-height: 135px; padding: 16px 17px; }
 .report-metric-card > strong { margin-top: 12px; font-size: clamp(1rem, 1.6vw, 1.48rem); }
 .report-metric-card > small { max-width: 34ch; line-height: 1.45; }
+.report-cashflow-metric { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: center; gap: 8px; }
+.report-cashflow-copy { display: grid; min-width: 0; align-content: start; }
+.report-cashflow-copy .metric-top { margin-bottom: 0; }
+.report-cashflow-copy > strong { margin-top: 9px; font-size: clamp(.95rem, 1.35vw, 1.3rem); overflow-wrap: anywhere; }
+.report-cashflow-copy > small { margin-top: 4px; color: #879399; font-size: .64rem; line-height: 1.4; }
+.report-cashflow-pie { display: block; width: 76px; height: 76px; }
+.report-cashflow-categories { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 20px; margin-top: 7px; }
+.report-cashflow-category { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; color: var(--cash-category-color); font-size: .61rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.report-cashflow-category i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--cash-category-color); }
+.report-cashflow-no-category { color: #879399; font-size: .62rem; }
 .report-breakdown-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; }
 .report-breakdown-card { display: grid; min-width: 0; align-content: start; gap: 7px; padding: 13px 14px; border: 1px solid #ebe7dd; border-top: 3px solid var(--blue); border-radius: 15px 15px 15px 6px; background: #fffefa; }
 .report-breakdown-card.tone-green { border-top-color: var(--green); }
@@ -632,7 +642,17 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .report-breakdown-card > span { color: #78858b; font-size: .67rem; font-weight: 800; line-height: 1.35; }
 .report-breakdown-card > strong { color: var(--ink); font: 700 clamp(.85rem, 1.1vw, 1rem)/1.25 'DM Mono', monospace; overflow-wrap: anywhere; }
 .report-breakdown-card > small { color: #879399; font-size: .64rem; line-height: 1.45; }
-.report-supplier-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.report-supplier-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.report-debt-card { display: grid; min-width: 0; align-content: start; gap: 9px; padding: 13px 14px; border: 1px solid #ebe7dd; border-top: 3px solid var(--blue); border-radius: 15px 15px 15px 6px; background: #fffefa; }
+.report-debt-card.tone-green { border-top-color: var(--green); }
+.report-debt-card > span { color: #78858b; font-size: .67rem; font-weight: 800; line-height: 1.35; }
+.report-debt-card > strong { color: var(--ink); font: 700 clamp(.85rem, 1.1vw, 1rem)/1.25 'DM Mono', monospace; overflow-wrap: anywhere; }
+.report-debt-progress { height: 6px; overflow: hidden; border-radius: 99px; background: #edf0eb; }
+.report-debt-progress > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #3d956c, #70b58a); }
+.report-debt-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.report-debt-stats > div { display: grid; gap: 4px; min-width: 0; }
+.report-debt-stats small, .report-debt-caption { color: #879399; font-size: .61rem; line-height: 1.4; }
+.report-debt-stats b { color: var(--ink); font: 700 .68rem 'DM Mono', monospace; overflow-wrap: anywhere; }
 .report-formula-note { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; padding: 11px 13px; border-radius: 13px; background: #f3f2ec; color: #6e7b80; font-size: .7rem; }
 .report-formula-note strong { color: var(--ink); }
 .report-formula-note span { color: #31414b; font: 600 .72rem 'DM Mono', monospace; text-align: right; }
@@ -648,10 +668,12 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 
 @media (max-width: 900px) {
   .report-supplier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-plan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .metric-grid.report-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .report-donut-legend { grid-template-columns: 1fr; }
+  .report-plan-metrics { grid-template-columns: 1fr; }
   .report-formula-note { align-items: flex-start; flex-direction: column; }
   .report-formula-note span { text-align: left; }
 }
@@ -730,10 +752,30 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .report-filter-body { margin-top: 14px; padding-top: 13px; border-top: 1px solid #eeeae1; }
 .report-filter-body .report-filter-top { align-items: center; }
 .report-filter-body .report-filter-note { max-width: 700px; }
-.report-plan-metrics { grid-template-columns: minmax(0, 1fr); margin: 0 0 13px; }
+.report-plan-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 13px; }
 .report-plan-metrics .metric-card,
 .report-plan-metrics .metric-card:nth-child(1),
 .report-plan-metrics .metric-card:nth-child(2) { min-height: 126px; }
+.report-plan-card { min-width: 0; padding: 0; overflow: hidden; }
+.report-plan-card > summary { display: block; min-height: 126px; padding: 16px 17px; cursor: pointer; list-style: none; }
+.report-plan-card > summary::-webkit-details-marker { display: none; }
+.report-plan-card > summary > strong { display: block; margin-top: 12px; color: var(--ink); font: 800 clamp(1rem, 1.6vw, 1.48rem)/1.25 'DM Mono', monospace; overflow-wrap: anywhere; }
+.report-plan-card > summary > small { display: block; margin-top: 6px; color: #879399; font-size: .67rem; line-height: 1.45; }
+.report-plan-card-action { display: inline-flex; align-items: center; gap: 4px; margin-top: 10px; color: var(--navy); font-size: .66rem; font-weight: 800; }
+.report-plan-card[open] .report-plan-card-action svg { transform: rotate(90deg); }
+.report-plan-card-details { display: grid; gap: 8px; padding: 0 12px 12px; }
+.report-plan-detail-group { display: grid; gap: 7px; min-width: 0; padding: 10px; border: 1px solid #ebe7dd; border-radius: 12px; background: #fffefa; }
+.report-plan-detail-group > div:first-child { display: grid; gap: 3px; }
+.report-plan-detail-group > div:first-child > strong { color: var(--ink); font-size: .69rem; }
+.report-plan-detail-group > div:first-child > small, .report-plan-invoice small { color: #879399; font-size: .6rem; line-height: 1.4; }
+.report-plan-invoices { display: grid; gap: 6px; }
+.report-plan-invoice { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding-top: 6px; border-top: 1px solid #f0ede5; }
+.report-plan-invoice > span { display: grid; gap: 2px; min-width: 0; }
+.report-plan-invoice strong { color: #536873; font-size: .64rem; overflow-wrap: anywhere; }
+.report-plan-invoice b { color: #28664c; font: 700 .65rem 'DM Mono', monospace; text-align: right; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .report-plan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .report-due-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 9px; }
 .report-due-card { display: grid; gap: 7px; min-width: 0; padding: 12px 13px; border: 1px solid #ebe7dd; border-radius: 14px 14px 14px 6px; background: #fffefa; }
 .report-due-card > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -782,6 +824,7 @@ body[data-tab="supplier"] .summary-grid { grid-template-columns: repeat(5, minma
   body[data-tab="supplier"] .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 390px) {
+  .report-supplier-grid { grid-template-columns: 1fr; }
   .report-due-cards, .stock-material-grid { grid-template-columns: 1fr; }
   body[data-tab="supplier"] .summary-grid { grid-template-columns: 1fr; }
 }

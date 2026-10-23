@@ -64,7 +64,7 @@ const state = {
   reportCategoryPreferenceError: false,
   reportFiltersOpen: false,
   reportIncomeWeek: null,
-  reportIncomePlanPeriod: 'week',
+  reportIncomePlanPeriod: 'month',
   incomeWeek: null,
   incomePlanPeriod: 'week',
   category: '',
@@ -337,11 +337,11 @@ function cashflowModal(row = {}) {
     const label = `${bill.supplier} · ${formatDate(bill.entry_date)} · ${description} · ${rupiah(bill.amount)} · sisa ${rupiah(bill.remaining)}`;
     return `<option value="${esc(bill.id)}" ${bill.id === selectedBillId ? 'selected' : ''} data-payment-limit="${bill.paymentLimit}" data-supplier="${esc(bill.supplier)}" data-bill-date="${esc(formatDate(bill.entry_date))}" data-bill-description="${esc(description)}" data-bill-amount="${esc(rupiah(bill.amount))}" data-bill-remaining="${esc(rupiah(bill.remaining))}">${esc(label)}</option>`;
   }).join('');
-  const supplierBillField = `<div class="field-wide cashflow-supplier-link" data-cashflow-supplier-link ${category === 'Cicilan piutang' ? '' : 'hidden'}><label class="field"><span>Pembayaran ini untuk tagihan supplier?</span><select name="supplier_bill_id" data-cashflow-bill-select><option value="" ${selectedBillId ? '' : 'selected'}>Tidak terkait piutang supplier</option>${billOptions}</select><small>Pilih tagihan berdasarkan supplier, tanggal, keterangan, nominal, dan sisa. Jika Cicilan piutang ini tidak terkait tagihan supplier, biarkan pilihan kosong.</small></label><p class="supplier-payment-preview" data-cashflow-bill-preview>${selectedBill ? `Tagihan dipilih: ${selectedBill.supplier} · ${formatDate(selectedBill.entry_date)} · ${selectedBill.description || 'Tanpa keterangan'} · ${rupiah(selectedBill.amount)}. Sisa pembayaran: ${rupiah(selectedBill.remaining)}.` : 'Cicilan piutang ini belum ditautkan ke tagihan supplier.'}</p></div>`;
+  const supplierBillField = `<div class="field-wide cashflow-supplier-link" data-cashflow-supplier-link ${category === 'Cicilan piutang' ? '' : 'hidden'}><label class="field"><span>Pembayaran ini untuk tagihan supplier?</span><select name="supplier_bill_id" data-cashflow-bill-select><option value="" ${selectedBillId ? '' : 'selected'}>Tidak terkait hutang supplier</option>${billOptions}</select><small>Pilih tagihan berdasarkan supplier, tanggal, keterangan, nominal, dan sisa. Jika pembayaran hutang ini tidak terkait tagihan supplier, biarkan pilihan kosong.</small></label><p class="supplier-payment-preview" data-cashflow-bill-preview>${selectedBill ? `Tagihan dipilih: ${selectedBill.supplier} · ${formatDate(selectedBill.entry_date)} · ${selectedBill.description || 'Tanpa keterangan'} · ${rupiah(selectedBill.amount)}. Sisa pembayaran: ${rupiah(selectedBill.remaining)}.` : 'Pembayaran hutang supplier ini belum ditautkan ke tagihan supplier.'}</p></div>`;
   openModal({
     title: row.id ? 'Edit transaksi kas' : 'Transaksi kas baru', action: 'save-cashflow', submit: row.id ? 'Simpan perubahan' : 'Simpan transaksi',
     attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true, attrs: 'data-cashflow-category' })}${supplierBillField}${inputField('Nama pengajuan', 'requester', row.requester || selectedBill?.supplier || '', 'text', { placeholder: 'Nama pemohon', attrs: 'data-cashflow-requester' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, max: selectedBill?.paymentLimit, step: '0.01', money: true, attrs: 'data-cashflow-amount' })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana', attrs: 'data-cashflow-description' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk, Pencairan lewat, dan Dana Talang menambah saldo; kategori lain dicatat sebagai debit.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item === 'Cicilan piutang' ? 'Cicilan hutang supplier' : item]), category, { required: true, attrs: 'data-cashflow-category' })}${supplierBillField}${inputField('Nama pengajuan', 'requester', row.requester || selectedBill?.supplier || '', 'text', { placeholder: 'Nama pemohon', attrs: 'data-cashflow-requester' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, max: selectedBill?.paymentLimit, step: '0.01', money: true, attrs: 'data-cashflow-amount' })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana', attrs: 'data-cashflow-description' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk, Pencairan lewat, dan Dana Talang menambah saldo; kategori lain dicatat sebagai debit.</p>`,
   });
 }
 
@@ -358,7 +358,7 @@ function updateCashflowSupplierSelection(select) {
   if (preview) {
     preview.textContent = option?.value
       ? `Tagihan dipilih: ${option.dataset.supplier} · ${option.dataset.billDate} · ${option.dataset.billDescription} · ${option.dataset.billAmount}. Sisa pembayaran: ${option.dataset.billRemaining}.`
-      : 'Cicilan piutang ini belum ditautkan ke tagihan supplier.';
+      : 'Pembayaran hutang supplier ini belum ditautkan ke tagihan supplier.';
   }
   if (option?.value) {
     const requester = form.querySelector('[data-cashflow-requester]');
@@ -484,7 +484,7 @@ function supplierEntryModal(type, supplier = '', row = {}) {
     : '';
   const formAttrs = [row.id ? `data-id="${esc(row.id)}"` : '', payment ? `data-supplier-balance="${Math.max(supplierBalance, 0)}"` : ''].filter(Boolean).join(' ');
   const dateField = inputField(payment ? 'Tanggal pembayaran' : 'Tanggal', 'entry_date', row.entry_date || isoToday(), 'date', { required: true });
-  const amountField = inputField(payment ? 'Nominal bayar' : 'Nominal piutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, max: payment ? initialLimit : undefined, step: '0.01', money: true });
+  const amountField = inputField(payment ? 'Nominal bayar' : 'Nominal hutang', 'amount', row.amount ?? '', 'number', { required: true, min: 0.01, max: payment ? initialLimit : undefined, step: '0.01', money: true });
   const paymentFields = payment ? `${amountField}${dateField}` : `${dateField}${amountField}`;
   openModal({
     title: row.id ? (payment ? 'Edit pembayaran supplier' : 'Edit tagihan supplier') : payment ? `Pembayaran supplier · ${supplier}` : 'Tagihan baru',
@@ -754,11 +754,11 @@ function exportData(kind) {
         csvMoney(Math.max(balanceAfterEntry.get(row.id) || 0, 0)), linkedBillLabel, row.description || '—',
       ];
     });
-    downloadReport(`spm-piutang-pemasok-${state.month}.csv`, 'Tagihan dan pembayaran supplier', period, [
+    downloadReport(`spm-hutang-pemasok-${state.month}.csv`, 'Hutang dan pembayaran supplier', period, [
       ['Jumlah transaksi periode', csvQuantity(rows.length)], ['Total tagihan periode (Rp)', csvMoney(bills)],
       ['Total pembayaran periode (Rp)', csvMoney(payments)], ['Perubahan saldo periode (Rp)', csvMoney(bills - payments)],
-      ['Sisa piutang seluruh supplier saat ekspor (Rp)', csvMoney(currentOutstanding)],
-      ['Supplier dengan piutang aktif saat ekspor', csvQuantity(currentBalances.filter((value) => value > 0).length)],
+      ['Sisa hutang seluruh supplier saat ekspor (Rp)', csvMoney(currentOutstanding)],
+      ['Supplier dengan hutang aktif saat ekspor', csvQuantity(currentBalances.filter((value) => value > 0).length)],
     ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Tagihan yang dibayar', 'Keterangan'], details,
     ['TOTAL PERIODE', '', '', csvMoney(bills), csvMoney(payments), '', '', '']);
   } else if (kind === 'events') {
@@ -1282,6 +1282,7 @@ async function handleChange(event) {
   if (target.matches('[data-filter="reportMonth"]')) {
     state.reportMonth = /^\d{4}-\d{2}$/.test(target.value) ? target.value : localISODate(new Date()).slice(0, 7);
     state.reportIncomeWeek = null;
+    state.reportIncomePlanPeriod = 'month';
     render(); return;
   }
   if (target.matches('[data-filter="reportIncomeWeek"]')) {
