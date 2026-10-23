@@ -1,7 +1,16 @@
+export const SUPPLIER_DEBT_CASH_CATEGORY = 'Cicilan hutang';
+
+export function normalizeCashCategory(value) {
+  const category = String(value ?? '').trim() || 'Lainnya';
+  const key = category.toLocaleLowerCase('id-ID');
+  if (['cicilan piutang', 'cicilan hutang supplier', 'cicilan hutang'].includes(key)) return SUPPLIER_DEBT_CASH_CATEGORY;
+  return category;
+}
+
 export const CASH_CATEGORIES = [
   'Admin', 'Gaji Staff', 'Gaji Produksi', 'Operasional', 'Uang Masuk', 'Pencairan lewat', 'Dana Talang', 'Listrik',
   'Subcon', 'ATK', 'Pajak', 'Telephone', 'Material Bahan', 'Fee Market',
-  'Cicilan piutang', 'Debit bank', 'Perawatan', 'Sewa Gudang', 'Lainnya',
+  SUPPLIER_DEBT_CASH_CATEGORY, 'Debit bank', 'Perawatan', 'Sewa Gudang', 'Lainnya',
 ];
 
 export const CAUSES = [
