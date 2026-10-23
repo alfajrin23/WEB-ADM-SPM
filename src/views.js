@@ -410,11 +410,18 @@ function supplierReceivables(data) {
     group.rows.push(row);
     groups.set(key, group);
   });
+  (data.supplier_debt_adjustments || []).forEach((row) => {
+    const key = supplierKey(row.supplier);
+    if (!key) return;
+    const group = groups.get(key) || { name: String(row.supplier).trim().replace(/\s+/g, ' '), rows: [] };
+    group.rows.push({ ...row, entry_type: 'adjustment' });
+    groups.set(key, group);
+  });
   return [...groups.values()].map((group) => {
     const rows = group.rows.sort((a, b) => (a.entry_date || '').localeCompare(b.entry_date || '')
       || (a.created_at || '').localeCompare(b.created_at || '')
       || String(a.id || '').localeCompare(String(b.id || '')));
-    const billed = rows.filter((row) => row.entry_type === 'bill').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const billed = rows.filter((row) => row.entry_type === 'bill' || row.entry_type === 'adjustment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const paid = rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const billsById = new Map(rows.filter((row) => row.entry_type === 'bill').map((row) => [row.id, row]));
     return { name: group.name, rows, billsById, billed, paid, balance: Math.max(billed - paid, 0) };
@@ -429,16 +436,18 @@ function payables(data, state) {
     const expanded = state.expandedSuppliers.has(supplier.name);
     let balance = 0;
     const details = supplier.rows.map((row) => {
-      balance += row.entry_type === 'bill' ? Number(row.amount || 0) : -Number(row.amount || 0);
-      const billAmount = row.entry_type === 'bill' ? money(row.amount) : '—';
+      balance += row.entry_type === 'bill' || row.entry_type === 'adjustment' ? Number(row.amount || 0) : -Number(row.amount || 0);
+      const billAmount = row.entry_type === 'bill' || row.entry_type === 'adjustment' ? money(row.amount) : '—';
       const paymentAmount = row.entry_type === 'payment' ? money(row.amount) : '—';
-      const description = row.description || (row.entry_type === 'bill' ? 'Tagihan baru' : 'Pembayaran');
+      const description = row.description || (row.entry_type === 'bill' ? 'Tagihan baru' : row.entry_type === 'adjustment' ? 'Koreksi total hutang' : 'Pembayaran');
       const linkedBill = row.entry_type === 'payment' && row.linked_bill_id ? supplier.billsById.get(row.linked_bill_id) : null;
       const linkedLabel = linkedBill
         ? `<small class="supplier-payment-link">Untuk tagihan ${formatDate(linkedBill.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${esc(linkedBill.description || 'Tanpa keterangan')} · ${money(linkedBill.amount)}</small>`
         : row.entry_type === 'payment' ? '<small class="supplier-payment-link supplier-payment-unlinked">Pembayaran belum ditautkan ke tagihan tertentu.</small>' : '';
       const sourceLabel = row.cashflow_transaction_id ? '<small class="supplier-payment-link">Sumber pembayaran: Cashflow</small>' : '';
-      const actions = row.cashflow_transaction_id
+      const actions = row.entry_type === 'adjustment'
+        ? '<span class="supplier-payment-source">Koreksi total hutang</span>'
+        : row.cashflow_transaction_id
         ? '<span class="supplier-payment-source">Kelola dari Cashflow</span>'
         : `${smallButton('Edit tagihan atau pembayaran', 'edit', `data-table="supplier_ledger_entries" data-id="${row.id}"`)}${smallButton('Hapus catatan', 'delete', `data-table="supplier_ledger_entries" data-id="${row.id}"`, 'trash', 'danger-icon')}`;
       return `<tr><td>${formatDate(row.entry_date, { day: '2-digit', month: '2-digit', year: 'numeric' })}</td><td><span>${esc(description)}</span>${linkedLabel}${sourceLabel}</td><td class="numeric">${billAmount}</td><td class="numeric">${paymentAmount}</td><td class="numeric">${money(Math.max(balance, 0))}</td><td class="row-actions">${actions}</td></tr>`;
@@ -446,9 +455,9 @@ function payables(data, state) {
     const paymentAction = supplier.balance > 0
       ? actionButton('Bayar', 'new-supplier-payment', `data-supplier="${esc(supplier.name)}"`, 'wallet', 'secondary')
       : '<span class="supplier-paid-badge">Lunas</span>';
-    return `<article class="supplier-card"><div class="supplier-card-head"><div><span class="eyebrow">SUPPLIER</span><h3>${esc(supplier.name)}</h3></div><div class="supplier-balance-pair"><div class="supplier-balance"><small>Total hutang</small><strong>${money(supplier.billed)}</strong></div><div class="supplier-balance outstanding"><small>Sisa hutang</small><strong>${money(supplier.balance)}</strong></div></div></div><div class="supplier-card-meta"><span>Sudah dibayar ${money(supplier.paid)}</span><span>${supplier.rows.length} catatan</span></div><div class="supplier-card-actions">${paymentAction}<button type="button" class="text-button" aria-expanded="${expanded}" data-act="toggle-supplier" data-supplier="${esc(supplier.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup riwayat' : 'Riwayat pembayaran'}</button></div>${expanded ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="numeric">Tagihan</th><th class="numeric">Bayar</th><th class="numeric">Sisa</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
+    return `<article class="supplier-card"><div class="supplier-card-head"><div><span class="eyebrow">SUPPLIER</span><h3>${esc(supplier.name)}</h3></div><div class="supplier-balance-pair"><div class="supplier-balance"><small>Total hutang</small><strong>${money(supplier.billed)}</strong></div><div class="supplier-balance outstanding"><small>Sisa hutang</small><strong>${money(supplier.balance)}</strong></div></div></div><div class="supplier-card-meta"><span>Sudah dibayar ${money(supplier.paid)}</span><span>${supplier.rows.length} catatan</span></div><div class="supplier-card-actions">${paymentAction}<button type="button" class="text-button" data-act="edit-supplier-debt-total" data-supplier="${esc(supplier.name)}">${icon('edit', 15)} Edit total hutang</button><button type="button" class="text-button" aria-expanded="${expanded}" data-act="toggle-supplier" data-supplier="${esc(supplier.name)}">${icon(expanded ? 'close' : 'file', 15)} ${expanded ? 'Tutup riwayat' : 'Riwayat pembayaran'}</button></div>${expanded ? tableWrap(`<table><thead><tr><th>Tanggal</th><th>Keterangan</th><th class="numeric">Tagihan / koreksi</th><th class="numeric">Bayar</th><th class="numeric">Sisa</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${details}</tbody></table>`) : ''}</article>`;
   }).join('');
-  return `${pageHead('KEUANGAN', 'Hutang supplier', 'Catat tagihan dan pembayaran supplier untuk melihat total hutang, pembayaran, serta sisa hutang.', `${actionButton('Export CSV', 'export', 'data-kind="supplier-ledger"', 'download', 'secondary')}${actionButton('Tagihan baru', 'new-supplier-bill', '', 'plus')}`)}
+  return `${pageHead('KEUANGAN', 'Hutang supplier', 'Catat tagihan, pembayaran, dan koreksi total hutang supplier.', `${actionButton('Export CSV', 'export', 'data-kind="supplier-ledger"', 'download', 'secondary')}${actionButton('Tagihan baru', 'new-supplier-bill', '', 'plus')}`)}
     <div class="summary-grid">${statStrip('Total hutang outstanding', money(openTotal))}${statStrip('Jumlah supplier aktif', integer(open.length))}${statStrip('Supplier sudah lunas', integer(groups.filter((row) => row.billed > 0 && row.balance === 0).length))}</div>
     <div class="supplier-list">${supplierCards || emptyState('Belum ada catatan supplier', 'Tambahkan tagihan pertama untuk mulai mencatat hutang dan pembayaran supplier.', 'new-supplier-bill', 'Tagihan baru', 'package')}</div>`;
 }

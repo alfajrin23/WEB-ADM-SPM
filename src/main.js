@@ -13,16 +13,16 @@ import { priceSpecs, pricelist } from './pricelist-data.js';
 import './style.css';
 
 const emptyData = () => ({
-  company_settings: [], cashflow_transactions: [], supplier_ledger_entries: [], sales_invoices: [],
+  company_settings: [], cashflow_transactions: [], supplier_ledger_entries: [], supplier_debt_adjustments: [], sales_invoices: [],
   supplier_purchase_orders: [], customer_orders: [], production_events: [],
 });
 const tablesByTab = {
   dashboard: ['company_settings', 'cashflow_transactions', 'sales_invoices', 'customer_orders', 'production_events'],
-  cashflow: ['company_settings', 'cashflow_transactions', 'supplier_ledger_entries'],
-  piutang: ['supplier_ledger_entries'],
+  cashflow: ['company_settings', 'cashflow_transactions', 'supplier_ledger_entries', 'supplier_debt_adjustments'],
+  piutang: ['supplier_ledger_entries', 'supplier_debt_adjustments'],
   tagihan: ['sales_invoices'],
   'po-customer': ['customer_orders'],
-  laporan: ['cashflow_transactions', 'sales_invoices', 'supplier_ledger_entries', 'customer_orders'],
+  laporan: ['cashflow_transactions', 'sales_invoices', 'supplier_ledger_entries', 'supplier_debt_adjustments', 'customer_orders'],
   produksi: ['customer_orders', 'production_events'],
   supplier: ['supplier_purchase_orders'],
   kalkulator: [],
@@ -324,7 +324,7 @@ function cashflowModal(row = {}) {
   const selectedBillId = row.supplier_bill_id || '';
   const supplierBills = entries.filter((entry) => entry.entry_type === 'bill')
     .map((bill) => {
-      const supplierBalance = Math.max(supplierBalanceFor(entries, bill.supplier, currentPayment?.id || ''), 0);
+      const supplierBalance = Math.max(supplierBalanceFor(entries, bill.supplier, currentPayment?.id || '', state.data.supplier_debt_adjustments), 0);
       const remaining = linkedBillBalanceFor(entries, bill.id, currentPayment?.id || '');
       return { ...bill, remaining: remaining || 0, paymentLimit: Math.min(supplierBalance, remaining || 0) };
     })
@@ -419,11 +419,25 @@ function normalizeSupplierName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
 }
 
-function supplierBalanceFor(entries, supplier, excludeId = '') {
+function supplierBalanceFor(entries, supplier, excludeId = '', adjustments = []) {
   const key = normalizeSupplierName(supplier);
-  return entries
+  const ledgerBalance = entries
     .filter((row) => row.id !== excludeId && normalizeSupplierName(row.supplier) === key)
     .reduce((balance, row) => balance + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0), 0);
+  const adjustmentBalance = adjustments
+    .filter((row) => normalizeSupplierName(row.supplier) === key)
+    .reduce((balance, row) => balance + Number(row.amount || 0), 0);
+  return ledgerBalance + adjustmentBalance;
+}
+
+function supplierDebtTotalFor(entries, adjustments, supplier) {
+  const key = normalizeSupplierName(supplier);
+  const bills = entries
+    .filter((row) => row.entry_type === 'bill' && normalizeSupplierName(row.supplier) === key)
+    .reduce((total, row) => total + Number(row.amount || 0), 0);
+  return bills + adjustments
+    .filter((row) => normalizeSupplierName(row.supplier) === key)
+    .reduce((total, row) => total + Number(row.amount || 0), 0);
 }
 
 function linkedBillBalanceFor(entries, billId, excludeId = '') {
@@ -438,7 +452,7 @@ function linkedBillBalanceFor(entries, billId, excludeId = '') {
 function supplierEntryModal(type, supplier = '', row = {}) {
   const payment = type === 'payment';
   const entries = state.data.supplier_ledger_entries;
-  const supplierBalance = payment ? supplierBalanceFor(entries, supplier, row.id || '') : 0;
+  const supplierBalance = payment ? supplierBalanceFor(entries, supplier, row.id || '', state.data.supplier_debt_adjustments) : 0;
   if (payment && supplierBalance <= 0) {
     toast('Supplier ini tidak memiliki sisa tagihan untuk dibayar.', 'info');
     return;
@@ -491,6 +505,22 @@ function supplierEntryModal(type, supplier = '', row = {}) {
     action: 'save-supplier-entry', submit: row.id ? 'Simpan perubahan' : payment ? 'Simpan pembayaran' : 'Simpan tagihan',
     attrs: formAttrs,
     body: `<div class="form-grid">${supplierField}${billField}${paymentPreview}${paymentFields}${inputField(payment ? 'Keterangan pembayaran (opsional)' : 'Keterangan (opsional)', 'description', row.description || '', 'text', { placeholder: payment ? 'Misalnya pembayaran sebagian' : 'No. invoice atau jenis bahan' })}<input type="hidden" name="entry_type" value="${payment ? 'payment' : 'bill'}"></div>${paymentLimitNote}`,
+  });
+}
+
+function supplierDebtTotalModal(supplier) {
+  const entries = state.data.supplier_ledger_entries;
+  const adjustments = state.data.supplier_debt_adjustments;
+  const supplierKey = normalizeSupplierName(supplier);
+  const paid = entries
+    .filter((row) => row.entry_type === 'payment' && normalizeSupplierName(row.supplier) === supplierKey)
+    .reduce((total, row) => total + Number(row.amount || 0), 0);
+  const total = supplierDebtTotalFor(entries, adjustments, supplier);
+  openModal({
+    title: `Edit total hutang · ${supplier}`,
+    action: 'save-supplier-debt-total',
+    submit: 'Simpan total hutang',
+    body: `<input type="hidden" name="supplier" value="${esc(supplier)}"><div class="form-grid">${inputField('Total hutang baru', 'total_amount', total, 'number', { required: true, min: paid, step: '0.01', money: true })}${inputField('Tanggal perubahan', 'entry_date', isoToday(), 'date', { required: true })}${inputField('Keterangan (opsional)', 'description', '', 'text', { placeholder: 'Misalnya koreksi total tagihan' })}</div><p class="form-hint">Total hutang tidak dapat lebih kecil dari pembayaran yang sudah tercatat. Riwayat tagihan dan pembayaran tetap tersimpan; selisih akan dicatat sebagai tagihan atau koreksi hutang.</p>`,
   });
 }
 
@@ -728,18 +758,24 @@ function exportData(kind) {
     ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order dari supplier', 'Qty diterima oleh kita', 'Sisa belum diterima', 'Harga/unit (Rp)', 'Nilai diterima (Rp)', 'PPN diterima (Rp)', 'Total diterima + PPN (Rp)'], details,
     ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.received), csvQuantity(totals.remaining), '', csvMoney(totals.receivedValue), csvMoney(totals.receivedTax), csvMoney(totals.receivedTotal)]);
   } else if (kind === 'supplier-ledger') {
-    const all = state.data.supplier_ledger_entries;
+    const all = [
+      ...state.data.supplier_ledger_entries,
+      ...state.data.supplier_debt_adjustments.map((row) => ({ ...row, entry_type: 'adjustment' })),
+    ];
     const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
     const billsById = new Map(all.filter((row) => row.entry_type === 'bill').map((row) => [row.id, row]));
     const chronological = [...all].sort((a, b) => supplierKey(a.supplier).localeCompare(supplierKey(b.supplier), 'id-ID')
       || (a.entry_date || '').localeCompare(b.entry_date || '') || (a.created_at || '').localeCompare(b.created_at || '') || String(a.id || '').localeCompare(String(b.id || '')));
     const balances = new Map(); const balanceAfterEntry = new Map();
     chronological.forEach((row) => {
-      const key = supplierKey(row.supplier); const next = (balances.get(key) || 0) + (row.entry_type === 'bill' ? 1 : -1) * Number(row.amount || 0);
+      const key = supplierKey(row.supplier);
+      const entryDelta = row.entry_type === 'bill' || row.entry_type === 'adjustment' ? Number(row.amount || 0) : -Number(row.amount || 0);
+      const next = (balances.get(key) || 0) + entryDelta;
       balances.set(key, next); balanceAfterEntry.set(row.id, next);
     });
     const rows = chronological.filter((row) => row.entry_date?.startsWith(state.month));
     const bills = rows.filter((row) => row.entry_type === 'bill').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const adjustments = rows.filter((row) => row.entry_type === 'adjustment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const payments = rows.filter((row) => row.entry_type === 'payment').reduce((sum, row) => sum + Number(row.amount || 0), 0);
     const currentBalances = [...balances.values()].map((value) => Math.max(value, 0));
     const currentOutstanding = currentBalances.reduce((sum, value) => sum + value, 0);
@@ -749,18 +785,18 @@ function exportData(kind) {
         ? `${csvDate(linkedBill.entry_date)} · ${linkedBill.description || 'Tanpa keterangan'} · ${csvMoney(linkedBill.amount)}`
         : row.entry_type === 'payment' ? 'Belum ditautkan ke tagihan tertentu' : '';
       return [
-        csvDate(row.entry_date), row.supplier, row.entry_type === 'bill' ? 'Tagihan' : 'Pembayaran',
-        row.entry_type === 'bill' ? csvMoney(row.amount) : '', row.entry_type === 'payment' ? csvMoney(row.amount) : '',
+        csvDate(row.entry_date), row.supplier, row.entry_type === 'bill' ? 'Tagihan' : row.entry_type === 'adjustment' ? 'Koreksi hutang' : 'Pembayaran',
+        row.entry_type === 'bill' || row.entry_type === 'adjustment' ? csvMoney(row.amount) : '', row.entry_type === 'payment' ? csvMoney(row.amount) : '',
         csvMoney(Math.max(balanceAfterEntry.get(row.id) || 0, 0)), linkedBillLabel, row.description || '—',
       ];
     });
     downloadReport(`spm-hutang-pemasok-${state.month}.csv`, 'Hutang dan pembayaran supplier', period, [
       ['Jumlah transaksi periode', csvQuantity(rows.length)], ['Total tagihan periode (Rp)', csvMoney(bills)],
-      ['Total pembayaran periode (Rp)', csvMoney(payments)], ['Perubahan saldo periode (Rp)', csvMoney(bills - payments)],
+      ['Koreksi hutang periode (Rp)', csvMoney(adjustments)], ['Total pembayaran periode (Rp)', csvMoney(payments)], ['Perubahan saldo periode (Rp)', csvMoney(bills + adjustments - payments)],
       ['Sisa hutang seluruh supplier saat ekspor (Rp)', csvMoney(currentOutstanding)],
       ['Supplier dengan hutang aktif saat ekspor', csvQuantity(currentBalances.filter((value) => value > 0).length)],
     ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Tagihan yang dibayar', 'Keterangan'], details,
-    ['TOTAL PERIODE', '', '', csvMoney(bills), csvMoney(payments), '', '', '']);
+    ['TOTAL PERIODE', '', '', csvMoney(bills + adjustments), csvMoney(payments), '', '', '']);
   } else if (kind === 'events') {
     const rows = state.data.production_events.filter((row) => row.event_date?.startsWith(state.month))
       .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '') || String(a.id || '').localeCompare(String(b.id || '')));
@@ -822,7 +858,7 @@ async function saveModal(form) {
       const bill = state.data.supplier_ledger_entries.find((row) => row.id === supplierBillId && row.entry_type === 'bill');
       if (!bill) throw new Error('Tagihan supplier yang dipilih tidak ditemukan. Muat ulang halaman lalu coba lagi.');
       const linkedPayment = state.data.supplier_ledger_entries.find((row) => row.cashflow_transaction_id === id && row.entry_type === 'payment');
-      const supplierBalance = supplierBalanceFor(state.data.supplier_ledger_entries, bill.supplier, linkedPayment?.id || '');
+      const supplierBalance = supplierBalanceFor(state.data.supplier_ledger_entries, bill.supplier, linkedPayment?.id || '', state.data.supplier_debt_adjustments);
       const billBalance = linkedBillBalanceFor(state.data.supplier_ledger_entries, supplierBillId, linkedPayment?.id || '');
       if (num('amount') > supplierBalance || num('amount') > Number(billBalance || 0)) {
         throw new Error(`Nominal melebihi sisa tagihan ${rupiah(Math.max(Math.min(supplierBalance, billBalance || 0), 0))}.`);
@@ -850,6 +886,33 @@ async function saveModal(form) {
     if (error) throw error;
     return valuesToSave;
   }
+  if (action === 'save-supplier-debt-total') {
+    const supplier = String(values.supplier || '').trim().replace(/\s+/g, ' ');
+    const total = num('total_amount');
+    const adjustmentDate = values.entry_date;
+    const description = String(values.description || '').trim() || 'Penyesuaian total hutang';
+    if (!supplier) throw new Error('Nama supplier wajib diisi.');
+    if (!adjustmentDate) throw new Error('Tanggal perubahan wajib diisi.');
+    if (!Number.isFinite(total) || total < 0) throw new Error('Total hutang harus nol atau lebih.');
+    const supplierKey = normalizeSupplierName(supplier);
+    const paid = state.data.supplier_ledger_entries
+      .filter((row) => row.entry_type === 'payment' && normalizeSupplierName(row.supplier) === supplierKey)
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    if (total < paid) throw new Error(`Total hutang tidak boleh lebih kecil dari pembayaran tercatat ${rupiah(paid)}.`);
+    const difference = total - supplierDebtTotalFor(state.data.supplier_ledger_entries, state.data.supplier_debt_adjustments, supplier);
+    if (Math.abs(difference) < 0.005) return { noChange: true };
+    if (difference > 0) {
+      const row = await saveRow('supplier_ledger_entries', {
+        supplier, entry_date: adjustmentDate, entry_type: 'bill', amount: difference,
+        description, linked_bill_id: null,
+      });
+      return { localTable: 'supplier_ledger_entries', row };
+    }
+    const row = await saveRow('supplier_debt_adjustments', {
+      supplier, entry_date: adjustmentDate, amount: difference, description,
+    });
+    return { localTable: 'supplier_debt_adjustments', row };
+  }
   if (action === 'save-supplier-entry') {
     const supplier = String(values.supplier || '').trim().replace(/\s+/g, ' ');
     const amount = num('amount');
@@ -859,7 +922,7 @@ async function saveModal(form) {
     const linkedBillId = String(values.linked_bill_id || '').trim() || null;
     if (values.entry_type === 'payment') {
       if (!id && !linkedBillId) throw new Error('Pilih tagihan supplier yang akan dibayar.');
-      const balance = supplierBalanceFor(state.data.supplier_ledger_entries, supplier, id);
+      const balance = supplierBalanceFor(state.data.supplier_ledger_entries, supplier, id, state.data.supplier_debt_adjustments);
       if (amount > balance) throw new Error(`Nominal bayar melebihi sisa seluruh tagihan supplier ${rupiah(Math.max(balance, 0))}.`);
       if (linkedBillId) {
         const linkedBill = state.data.supplier_ledger_entries.find((row) => row.id === linkedBillId && row.entry_type === 'bill');
@@ -1150,6 +1213,7 @@ async function handleClick(event) {
   if (action === 'new-customer-order') { customerOrderModal(); return; }
   if (action === 'new-supplier-bill') { supplierEntryModal('bill'); return; }
   if (action === 'new-supplier-payment') { supplierEntryModal('payment', button.dataset.supplier || ''); return; }
+  if (action === 'edit-supplier-debt-total') { supplierDebtTotalModal(button.dataset.supplier || ''); return; }
   if (action === 'new-production') { customerOrderModal(); return; }
   if (action === 'new-event') { productionEventModal(button.dataset.order || ''); return; }
   if (action === 'new-po') { supplierOrderModal(); return; }
@@ -1411,13 +1475,14 @@ async function handleSubmit(event) {
     const result = await saveModal(form);
     const action = form.dataset.action;
     if (result?.deleted) removeLocalRow(result.table, result.id);
+    else if (result?.localTable && result.row) updateLocalRow(result.localTable, result.row);
     else if (tableByAction[action] && result) updateLocalRow(tableByAction[action], result);
     state.modal = null;
     state.pendingDelete = null;
     state.inputLogsMonth = '';
     state.busy = false;
     render();
-    const successMessage = action === 'confirm-delete' ? 'Data berhasil dihapus.' : action === 'mark-invoice-paid' ? 'Tanggal pelunasan invoice berhasil dicatat.' : form.dataset.id ? 'Data berhasil diperbarui.' : 'Data berhasil disimpan.';
+    const successMessage = action === 'confirm-delete' ? 'Data berhasil dihapus.' : action === 'mark-invoice-paid' ? 'Tanggal pelunasan invoice berhasil dicatat.' : action === 'save-supplier-debt-total' ? result?.noChange ? 'Total hutang tidak berubah.' : 'Total hutang supplier berhasil diperbarui.' : form.dataset.id ? 'Data berhasil diperbarui.' : 'Data berhasil disimpan.';
     const successType = action === 'confirm-delete' || action === 'mark-invoice-paid' ? 'success' : form.dataset.id ? 'info' : 'success';
     toast(successMessage, successType);
   } catch (error) {
