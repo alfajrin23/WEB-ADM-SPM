@@ -258,12 +258,37 @@ export function buildReport(data, state) {
   const supplierOldRawOutstanding = sum(supplierOldBillRows, supplierOutstandingForRow);
   const supplierNewRawTotal = sum(supplierNewBillRows, (row) => amountOf(row.amount));
   const supplierOldRawTotal = sum(supplierOldBillRows, (row) => amountOf(row.amount));
-  const supplierDebtCredit = Math.max(-sum(supplierAdjustmentsThroughPeriod, (row) => amountOf(row.amount)), 0);
-  const supplierRawOutstanding = supplierOldRawOutstanding + supplierNewRawOutstanding;
-  const supplierOldCredit = supplierRawOutstanding > 0
-    ? Math.min(Math.round((supplierDebtCredit * supplierOldRawOutstanding / supplierRawOutstanding) * 100) / 100, supplierOldRawOutstanding)
-    : 0;
-  const supplierNewCredit = Math.min(Math.max(supplierDebtCredit - supplierOldCredit, 0), supplierNewRawOutstanding);
+  const supplierKey = (value) => String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID');
+  const supplierDebtByKey = new Map();
+  const supplierDebtGroup = (supplier) => {
+    const key = supplierKey(supplier);
+    const group = supplierDebtByKey.get(key) || { oldOutstanding: 0, newOutstanding: 0, adjustments: 0 };
+    supplierDebtByKey.set(key, group);
+    return group;
+  };
+  supplierOldBillRows.forEach((row) => {
+    const group = supplierDebtGroup(row.supplier);
+    group.oldOutstanding += supplierOutstandingForRow(row);
+  });
+  supplierNewBillRows.forEach((row) => {
+    const group = supplierDebtGroup(row.supplier);
+    group.newOutstanding += supplierOutstandingForRow(row);
+  });
+  supplierAdjustmentsThroughPeriod.forEach((row) => {
+    supplierDebtGroup(row.supplier).adjustments += amountOf(row.amount);
+  });
+  let supplierOldCredit = 0;
+  let supplierNewCredit = 0;
+  supplierDebtByKey.forEach((group) => {
+    const credit = Math.max(-group.adjustments, 0);
+    const rawOutstanding = group.oldOutstanding + group.newOutstanding;
+    const oldCredit = rawOutstanding > 0
+      ? Math.min(Math.round((credit * group.oldOutstanding / rawOutstanding) * 100) / 100, group.oldOutstanding)
+      : 0;
+    const newCredit = Math.min(Math.max(credit - oldCredit, 0), group.newOutstanding);
+    supplierOldCredit += oldCredit;
+    supplierNewCredit += newCredit;
+  });
   const supplierOldDebtTotal = supplierOldRawTotal - supplierOldCredit;
   const supplierNewDebtTotal = supplierNewRawTotal - supplierNewCredit;
   const supplierOldOutstanding = supplierOldRawOutstanding - supplierOldCredit;
@@ -467,7 +492,7 @@ function reportSupplierPanel(report) {
   const newCaption = `${integer(report.supplierNewBillRows.length)} tagihan sampai akhir ${report.periodName}.`;
   const newPaymentCount = report.supplierPaymentRows.filter((row) => row.allocation === 'new').length;
   const oldPaymentCount = report.supplierPaymentRows.filter((row) => row.allocation === 'old').length;
-  return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">HUTANG SUPPLIER</p><h2 id="report-supplier-title">Hutang supplier</h2><p>Nilai tagihan supplier dibagi menjadi hutang lama sebelum 1 Okt 2026 dan hutang baru mulai 1 Okt 2026. Pembayaran bulan ${esc(report.periodName)} dirinci menurut tagihan yang dilunasi.</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportDebtSummaryCard('Total hutang lama', oldBillTotal, report.supplierOldPaidThroughPeriod, report.supplierOldOutstanding, oldCaption, 'blue')}${reportDebtSummaryCard('Total hutang baru · mulai 1 Okt 2026', newBillTotal, report.supplierNewPaidThroughPeriod, report.supplierNewOutstanding, newCaption, 'green')}${reportBreakdownCard(`Pembayaran hutang baru · ${report.periodName}`, rupiah(report.supplierPaymentsToNewBills), `${integer(newPaymentCount)} pembayaran untuk tagihan mulai 1 Okt 2026.`, 'gold')}${reportBreakdownCard(`Pembayaran hutang lama · ${report.periodName}`, rupiah(report.supplierPaymentsToOldBills), `${integer(oldPaymentCount)} pembayaran untuk tagihan sebelum 1 Okt 2026.`, 'violet')}</div>${paymentDetails}<p class="report-source-note">Koreksi total hutang tercatat pada tanggal perubahan dan dialokasikan proporsional ke sisa hutang lama dan baru. Total dibayar dan sisa dihitung sampai akhir ${esc(report.periodName)}. Sumber: menu Hutang dan catatan koreksi supplier.</p></section>`;
+  return `<section class="panel report-section" aria-labelledby="report-supplier-title"><div class="panel-heading"><div><p class="eyebrow">HUTANG SUPPLIER</p><h2 id="report-supplier-title">Hutang supplier</h2><p>Nilai tagihan supplier dibagi menjadi hutang lama sebelum 1 Okt 2026 dan hutang baru mulai 1 Okt 2026. Pembayaran bulan ${esc(report.periodName)} dirinci menurut tagihan yang dilunasi.</p></div></div><div class="report-breakdown-grid report-supplier-grid">${reportDebtSummaryCard('Total hutang lama', oldBillTotal, report.supplierOldPaidThroughPeriod, report.supplierOldOutstanding, oldCaption, 'blue')}${reportDebtSummaryCard('Total hutang baru · mulai 1 Okt 2026', newBillTotal, report.supplierNewPaidThroughPeriod, report.supplierNewOutstanding, newCaption, 'green')}${reportBreakdownCard(`Pembayaran hutang baru · ${report.periodName}`, rupiah(report.supplierPaymentsToNewBills), `${integer(newPaymentCount)} pembayaran untuk tagihan mulai 1 Okt 2026.`, 'gold')}${reportBreakdownCard(`Pembayaran hutang lama · ${report.periodName}`, rupiah(report.supplierPaymentsToOldBills), `${integer(oldPaymentCount)} pembayaran untuk tagihan sebelum 1 Okt 2026.`, 'violet')}</div>${paymentDetails}<p class="report-source-note">Koreksi total hutang tercatat pada tanggal perubahan dan dialokasikan proporsional ke sisa hutang lama dan baru untuk masing-masing supplier. Total dibayar dan sisa dihitung sampai akhir ${esc(report.periodName)}. Sumber: menu Hutang dan catatan koreksi supplier.</p></section>`;
 }
 
 function reportCSV(report, state) {
