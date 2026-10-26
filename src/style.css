@@ -320,17 +320,26 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .order-total-preview small { color: #89939a; font-size: .59rem; }
 .customer-order-table { min-width: 1510px; }
 .production-performance-table { min-width: 2240px; }
-.supplier-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.supplier-card { min-width: 0; padding: 17px; border: 1px solid #e4e0d7; border-radius: 21px 21px 21px 8px; background: rgba(255, 254, 250, .93); box-shadow: 0 7px 20px rgba(48, 54, 55, .03); }
+.supplier-list { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.supplier-card { min-width: 0; padding: 15px; border: 1px solid #e4e0d7; border-radius: 15px; background: rgba(255, 254, 250, .93); box-shadow: 0 7px 20px rgba(48, 54, 55, .03); }
 .supplier-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.supplier-card h3 { margin: 2px 0 0; font: 800 1.06rem Manrope, sans-serif; }
+.supplier-card h3 { margin: 2px 0 0; color: #354b60; font: 800 1.06rem Manrope, sans-serif; text-transform: uppercase; }
+.supplier-contract-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.supplier-contract-value { display: grid; min-width: 0; gap: 5px; text-align: center; }
+.supplier-contract-value small { color: #7d898e; font-size: .67rem; }
+.supplier-contract-value strong { overflow-wrap: anywhere; color: var(--navy); font: 600 .88rem 'DM Mono', monospace; }
+.supplier-contract-value.outstanding strong { color: #d94b45; }
+.supplier-contract-progress { height: 6px; margin: 11px 2px 0; overflow: hidden; border-radius: 999px; background: #e7ebe8; }
+.supplier-contract-progress i { display: block; height: 100%; border-radius: inherit; background: #6aa27c; }
 .supplier-balance-pair { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 15px; }
 .supplier-balance { display: grid; gap: 4px; text-align: right; }
 .supplier-balance small { color: #7d898e; font-size: .65rem; }
 .supplier-balance strong { color: var(--navy); font: 600 .86rem 'DM Mono', monospace; }
 .supplier-balance.outstanding strong { color: #a33c3c; }
-.supplier-card-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; color: #808b90; font-size: .67rem; }
-.supplier-card-actions { display: flex; align-items: center; gap: 13px; margin-top: 12px; }
+.supplier-card-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; color: #808b90; font-size: .67rem; }
+.supplier-card-actions { display: flex; align-items: center; gap: 16px; margin-top: 11px; }
+.supplier-history-button { color: #338457; }
+.supplier-history-arrow { font-size: 1rem; line-height: 1; }
 .supplier-paid-badge { display: inline-flex; align-items: center; min-height: 36px; padding: 0 13px; border: 1px solid #cce2d5; border-radius: 11px; background: #edf6f0; color: #287857; font-size: .7rem; font-weight: 800; }
 .supplier-card > .table-wrap { margin-top: 14px; }
 .supplier-card .table-wrap table { min-width: 660px; }
@@ -591,7 +600,11 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
   .supplier-balance-pair { width: 100%; justify-content: flex-start; }
   .supplier-balance { text-align: left; }
   .supplier-card-actions { flex-wrap: wrap; }
-  .supplier-card-actions .button { flex: 1 1 auto; }
+  .supplier-card-actions .button { flex: 0 0 auto; }
+  .supplier-contract-values { gap: 5px; }
+  .supplier-contract-value { gap: 4px; }
+  .supplier-contract-value small { font-size: .58rem; }
+  .supplier-contract-value strong { font-size: .68rem; }
   .app-footer { gap: 10px; font-size: .58rem; }
   .form-grid, .three-col { grid-template-columns: 1fr; }
   .field-wide { grid-column: auto; }
