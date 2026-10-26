@@ -155,6 +155,9 @@ function friendlyError(error) {
   if (/relation .* does not exist|schema cache|could not find the table/i.test(message)) {
     return 'Tabel aplikasi belum dibuat. Jalankan supabase/schema.sql pada SQL Editor Supabase, lalu muat ulang halaman.';
   }
+  if (/supplier_purchase_orders_owner_id_po_number_key|supplier_po_workspace_number_uidx/i.test(message)) {
+    return 'Nomor PO supplier sudah digunakan. Buka PO yang sudah ada untuk mengubahnya, atau gunakan nomor PO lain.';
+  }
   if (/invalid login credentials/i.test(message)) return 'Email atau kata sandi belum cocok.';
   if (/email not confirmed/i.test(message)) return 'Konfirmasi alamat email dari tautan yang dikirim Supabase, lalu masuk kembali.';
   return message;
@@ -1000,6 +1003,11 @@ async function saveModal(form) {
     }, id);
   }
   if (action === 'save-po') {
+    const poNumber = values.po_number.trim();
+    const duplicate = state.data.supplier_purchase_orders.find((order) => order.id !== id && String(order.po_number || '').trim() === poNumber);
+    if (duplicate) {
+      throw new Error(`Nomor PO supplier "${poNumber}" sudah terdaftar${duplicate.supplier ? ` pada ${duplicate.supplier}` : ''}. Buka PO tersebut untuk mengubahnya, atau gunakan nomor PO lain.`);
+    }
     const items = [...form.querySelectorAll('[data-po-item]')].map((section) => ({
       item: section.querySelector('[name="item-item"]').value.trim(),
       qlty: section.querySelector('[name="item-qlty"]').value,
@@ -1010,7 +1018,7 @@ async function saveModal(form) {
     }));
     if (!items.length) throw new Error('Tambahkan setidaknya satu item pada PO.');
     return saveRow('supplier_purchase_orders', {
-      order_date: values.order_date, po_number: values.po_number.trim(), supplier: values.supplier.trim(), customer: values.customer.trim(), items,
+      order_date: values.order_date, po_number: poNumber, supplier: values.supplier.trim(), customer: values.customer.trim(), items,
     }, id);
   }
   if (action === 'save-received') {
