@@ -86,6 +86,7 @@ const state = {
 
 const app = document.querySelector('#app');
 const CASH_CREDIT_CATEGORIES = new Set(['Uang Masuk', 'Pencairan lewat', 'Dana Talang']);
+const inputLogsCacheTtlMs = 5 * 60 * 1000;
 let authHydration = 0;
 let activeDataLoads = 0;
 let dataLoadGeneration = 0;
@@ -236,7 +237,7 @@ function removeLocalRow(table, id) {
 
 async function refreshData({
   tables = tablesByTab[state.tab] || [], forceTables = false,
-  includeAdmin = state.tab === 'logs-input', forceLogs = false, forceProfiles = false,
+  includeAdmin = state.tab === 'logs-input',
   showLoading = true,
 } = {}) {
   const tablesToLoad = [...new Set(tables)].filter((table) => forceTables
@@ -244,8 +245,8 @@ async function refreshData({
     || Date.now() - (state.tableLoadedAt.get(table) || 0) > 60_000);
   const isDeveloper = state.profile?.role === 'developer' && includeAdmin;
   const requestedLogMonth = state.month;
-  const shouldLoadLogs = isDeveloper && (forceLogs || state.inputLogsMonth !== requestedLogMonth || Date.now() - state.inputLogsLoadedAt > 60_000);
-  const shouldLoadProfiles = isDeveloper && (forceProfiles || !state.profilesLoaded);
+  const shouldLoadLogs = isDeveloper && (state.inputLogsMonth !== requestedLogMonth || Date.now() - state.inputLogsLoadedAt > inputLogsCacheTtlMs);
+  const shouldLoadProfiles = isDeveloper && !state.profilesLoaded;
   if (!tablesToLoad.length && !shouldLoadLogs && !shouldLoadProfiles) {
     if (showLoading) render();
     return;
@@ -1171,7 +1172,7 @@ async function handleClick(event) {
   if (action === 'navigate') {
     if (button.dataset.tab === 'logs-input' && state.profile?.role !== 'developer') return;
     state.tab = button.dataset.tab; state.search = ''; state.modal = null;
-    void refreshData({ forceLogs: state.tab === 'logs-input', forceProfiles: state.tab === 'logs-input' });
+    void refreshData();
     return;
   }
   if (action === 'toggle-report-filters') { state.reportFiltersOpen = !state.reportFiltersOpen; render(); return; }
@@ -1375,7 +1376,7 @@ async function handleChange(event) {
   if (target.matches('[data-filter="month"]')) {
     state.month = target.value;
     if (state.tab === 'logs-input') {
-      void refreshData({ tables: [], includeAdmin: true, forceLogs: true, showLoading: false });
+      void refreshData({ tables: [], includeAdmin: true, showLoading: false });
     } else render();
     return;
   }
