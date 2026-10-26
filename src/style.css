@@ -320,7 +320,7 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .order-total-preview small { color: #89939a; font-size: .59rem; }
 .customer-order-table { min-width: 1510px; }
 .production-performance-table { min-width: 2240px; }
-.supplier-list { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.supplier-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .supplier-card { min-width: 0; padding: 15px; border: 1px solid #e4e0d7; border-radius: 15px; background: rgba(255, 254, 250, .93); box-shadow: 0 7px 20px rgba(48, 54, 55, .03); }
 .supplier-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .supplier-card h3 { margin: 2px 0 0; color: #354b60; font: 800 1.06rem Manrope, sans-serif; text-transform: uppercase; }
