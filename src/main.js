@@ -4,7 +4,7 @@ import {
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
 import {
-  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, integer, isoToday, localISODate,
+  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, integer, isoToday, localISODate, normalizeCashflowCategory,
   monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity, toNumber,
 } from './helpers.js';
 import { calculatorValues, pageTabs, renderPage, renderSignIn } from './views.js';
@@ -118,9 +118,9 @@ function syncReportCategoryPreferences() {
       state.reportCategoryPreferenceError = true;
     }
     const known = Array.isArray(saved?.categories)
-      ? saved.categories.filter((category) => !isDeprecatedReportCategory(category)) : [];
+      ? [...new Set(saved.categories.map(normalizeCashflowCategory).filter((category) => !isDeprecatedReportCategory(category)))] : [];
     const selected = Array.isArray(saved?.selected)
-      ? [...new Set(saved.selected.filter((category) => !isDeprecatedReportCategory(category)))] : null;
+      ? [...new Set(saved.selected.map(normalizeCashflowCategory).filter((category) => !isDeprecatedReportCategory(category)))] : null;
     state.reportCategoryStorageKey = key;
     state.reportCategoryKnownCategories = [...new Set([...known, ...(selected || []), ...options])];
     state.reportCategories = selected
@@ -131,8 +131,8 @@ function syncReportCategoryPreferences() {
   }
   const previousKnown = Array.isArray(state.reportCategoryKnownCategories) ? state.reportCategoryKnownCategories : [];
   const previousSelected = Array.isArray(state.reportCategories) ? state.reportCategories : [];
-  const known = [...new Set(previousKnown.filter((category) => !isDeprecatedReportCategory(category)))];
-  const selected = [...new Set(previousSelected.filter((category) => !isDeprecatedReportCategory(category)))];
+  const known = [...new Set(previousKnown.map(normalizeCashflowCategory).filter((category) => !isDeprecatedReportCategory(category)))];
+  const selected = [...new Set(previousSelected.map(normalizeCashflowCategory).filter((category) => !isDeprecatedReportCategory(category)))];
   const newCategories = options.filter((category) => !known.includes(category));
   state.reportCategoryKnownCategories = [...known, ...newCategories];
   state.reportCategories = [...new Set([...selected, ...newCategories])];
@@ -268,6 +268,13 @@ async function refreshData({
     ]);
     if (state.session?.user?.id !== userId) return;
     if (workspace) {
+      if (workspace.cashflow_transactions) {
+        const transactions = workspace.cashflow_transactions;
+        workspace.cashflow_transactions = transactions.map((row) => ({
+          ...row,
+          category: normalizeCashflowCategory(row.category),
+        }));
+      }
       state.data = { ...state.data, ...workspace };
       tablesToLoad.forEach((table) => {
         state.loadedTables.add(table);
@@ -321,7 +328,7 @@ function openModal(modal) {
 }
 
 function cashflowModal(row = {}) {
-  const category = row.category || CASH_CATEGORIES[0];
+  const category = normalizeCashflowCategory(row.category || CASH_CATEGORIES[0]);
   const kind = CASH_CREDIT_CATEGORIES.has(category) ? 'credit' : (row.kind || 'debit');
   const entries = state.data.supplier_ledger_entries || [];
   const currentPayment = entries.find((entry) => entry.cashflow_transaction_id === row.id && entry.entry_type === 'payment');
@@ -341,11 +348,11 @@ function cashflowModal(row = {}) {
     const label = `${bill.supplier} · ${formatDate(bill.entry_date)} · ${description} · ${rupiah(bill.amount)} · sisa ${rupiah(bill.remaining)}`;
     return `<option value="${esc(bill.id)}" ${bill.id === selectedBillId ? 'selected' : ''} data-payment-limit="${bill.paymentLimit}" data-supplier="${esc(bill.supplier)}" data-bill-date="${esc(formatDate(bill.entry_date))}" data-bill-description="${esc(description)}" data-bill-amount="${esc(rupiah(bill.amount))}" data-bill-remaining="${esc(rupiah(bill.remaining))}">${esc(label)}</option>`;
   }).join('');
-  const supplierBillField = `<div class="field-wide cashflow-supplier-link" data-cashflow-supplier-link ${category === 'Cicilan piutang' ? '' : 'hidden'}><label class="field"><span>Pembayaran ini untuk tagihan supplier?</span><select name="supplier_bill_id" data-cashflow-bill-select><option value="" ${selectedBillId ? '' : 'selected'}>Tidak terkait hutang supplier</option>${billOptions}</select><small>Pilih tagihan berdasarkan supplier, tanggal, keterangan, nominal, dan sisa. Jika pembayaran hutang ini tidak terkait tagihan supplier, biarkan pilihan kosong.</small></label><p class="supplier-payment-preview" data-cashflow-bill-preview>${selectedBill ? `Tagihan dipilih: ${selectedBill.supplier} · ${formatDate(selectedBill.entry_date)} · ${selectedBill.description || 'Tanpa keterangan'} · ${rupiah(selectedBill.amount)}. Sisa pembayaran: ${rupiah(selectedBill.remaining)}.` : 'Pembayaran hutang supplier ini belum ditautkan ke tagihan supplier.'}</p></div>`;
+  const supplierBillField = `<div class="field-wide cashflow-supplier-link" data-cashflow-supplier-link ${category === 'Cicilan hutang' ? '' : 'hidden'}><label class="field"><span>Pembayaran ini untuk tagihan supplier?</span><select name="supplier_bill_id" data-cashflow-bill-select><option value="" ${selectedBillId ? '' : 'selected'}>Tidak terkait hutang supplier</option>${billOptions}</select><small>Pilih tagihan berdasarkan supplier, tanggal, keterangan, nominal, dan sisa. Jika pembayaran hutang ini tidak terkait tagihan supplier, biarkan pilihan kosong.</small></label><p class="supplier-payment-preview" data-cashflow-bill-preview>${selectedBill ? `Tagihan dipilih: ${selectedBill.supplier} · ${formatDate(selectedBill.entry_date)} · ${selectedBill.description || 'Tanpa keterangan'} · ${rupiah(selectedBill.amount)}. Sisa pembayaran: ${rupiah(selectedBill.remaining)}.` : 'Pembayaran hutang supplier ini belum ditautkan ke tagihan supplier.'}</p></div>`;
   openModal({
     title: row.id ? 'Edit transaksi kas' : 'Transaksi kas baru', action: 'save-cashflow', submit: row.id ? 'Simpan perubahan' : 'Simpan transaksi',
     attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item === 'Cicilan piutang' ? 'Cicilan hutang supplier' : item]), category, { required: true, attrs: 'data-cashflow-category' })}${supplierBillField}${inputField('Nama pengajuan', 'requester', row.requester || selectedBill?.supplier || '', 'text', { placeholder: 'Nama pemohon', attrs: 'data-cashflow-requester' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, max: selectedBill?.paymentLimit, step: '0.01', money: true, attrs: 'data-cashflow-amount' })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana', attrs: 'data-cashflow-description' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk, Pencairan lewat, dan Dana Talang menambah saldo; kategori lain dicatat sebagai debit.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal transaksi', 'transaction_date', row.transaction_date || isoToday(), 'date', { required: true })}${selectField('Kategori', 'category', CASH_CATEGORIES.map((item) => [item, item]), category, { required: true, attrs: 'data-cashflow-category' })}${supplierBillField}${inputField('Nama pengajuan', 'requester', row.requester || selectedBill?.supplier || '', 'text', { placeholder: 'Nama pemohon', attrs: 'data-cashflow-requester' })}${inputField('Nominal', 'amount', row.amount ?? '', 'number', { required: true, min: 0, max: selectedBill?.paymentLimit, step: '0.01', money: true, attrs: 'data-cashflow-amount' })}${inputField('Keterangan', 'description', row.description || '', 'textarea', { full: true, placeholder: 'Tujuan pengeluaran atau sumber dana', attrs: 'data-cashflow-description' })}<input type="hidden" name="kind" value="${kind}"></div><p class="form-hint">Kategori Uang Masuk, Pencairan lewat, dan Dana Talang menambah saldo; kategori lain dicatat sebagai debit.</p>`,
   });
 }
 
@@ -383,8 +390,8 @@ function updateCashflowCategorySelection(select) {
   const form = select.closest('form');
   const field = form?.querySelector('[data-cashflow-supplier-link]');
   if (!field) return;
-  field.hidden = select.value !== 'Cicilan piutang';
-  if (select.value !== 'Cicilan piutang') {
+  field.hidden = normalizeCashflowCategory(select.value) !== 'Cicilan hutang';
+  if (normalizeCashflowCategory(select.value) !== 'Cicilan hutang') {
     const amount = form.querySelector('[data-cashflow-amount]');
     if (amount) delete amount.dataset.max;
   } else {
@@ -855,8 +862,8 @@ async function saveModal(form) {
   const action = form.dataset.action;
   const num = (key) => toNumber(values[key]);
   if (action === 'save-cashflow') {
-    const category = values.category;
-    const supplierBillId = category === 'Cicilan piutang' ? (String(values.supplier_bill_id || '').trim() || null) : null;
+    const category = normalizeCashflowCategory(values.category);
+    const supplierBillId = category === 'Cicilan hutang' ? (String(values.supplier_bill_id || '').trim() || null) : null;
     const previous = id ? state.data.cashflow_transactions.find((row) => row.id === id) : null;
     if (supplierBillId) {
       const bill = state.data.supplier_ledger_entries.find((row) => row.id === supplierBillId && row.entry_type === 'bill');

@@ -1,8 +1,13 @@
 export const CASH_CATEGORIES = [
   'Admin', 'Gaji Staff', 'Gaji Produksi', 'Operasional', 'Uang Masuk', 'Pencairan lewat', 'Dana Talang', 'Listrik',
   'Subcon', 'ATK', 'Pajak', 'Telephone', 'Material Bahan', 'Fee Market',
-  'Cicilan piutang', 'Debit bank', 'Perawatan', 'Sewa Gudang', 'Lainnya',
+  'Cicilan hutang', 'Debit bank', 'Perawatan', 'Sewa Gudang', 'Lainnya',
 ];
+
+export function normalizeCashflowCategory(value = '') {
+  const category = String(value ?? '').trim();
+  return category.toLocaleLowerCase('id-ID') === 'cicilan piutang' ? 'Cicilan hutang' : category;
+}
 
 export const CAUSES = [
   ['administrasi', 'Administrasi'], ['material', 'Bahan baku'], ['produksi', 'Produksi'],

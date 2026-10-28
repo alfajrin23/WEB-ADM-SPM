@@ -1,10 +1,10 @@
 import {
   CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, icon, integer,
-  monthName, rupiah,
+  monthName, normalizeCashflowCategory, rupiah,
 } from './helpers.js';
 
-const normalizeCategory = (value) => String(value ?? '').trim() || 'Tanpa kategori';
-const displayCategory = (value) => normalizeCategory(value) === 'Cicilan piutang' ? 'Cicilan hutang supplier' : normalizeCategory(value);
+const normalizeCategory = (value) => normalizeCashflowCategory(value) || 'Tanpa kategori';
+const displayCategory = normalizeCategory;
 export const isDeprecatedReportCategory = (value) => normalizeCategory(value).toLocaleLowerCase('id-ID') === 'cicilan';
 const amountOf = (value) => Number(value) || 0;
 const unique = (values) => [...new Set(values)];
