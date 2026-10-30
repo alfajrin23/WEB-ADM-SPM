@@ -108,7 +108,8 @@ export function toNumber(value) {
 export function downloadCsv(filename, rows) {
   const csv = rows.map((row) => row.map((value) => {
     const isNumber = value && typeof value === 'object' && value.__csvNumeric === true;
-    let text = isNumber ? String(value.value ?? '') : String(value ?? '');
+    const isDate = value && typeof value === 'object' && value.__csvDate === true;
+    let text = isNumber || isDate ? String(value.value ?? '') : String(value ?? '');
     if (!isNumber && typeof value === 'string' && /^[\t\r ]*[=+\-@]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   }).join(';')).join('\r\n');

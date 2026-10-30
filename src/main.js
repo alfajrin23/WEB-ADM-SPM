@@ -3,6 +3,7 @@ import {
   setWorkspaceId, setWorkspaceUserRole, saveRow, deleteRow, upsertRows,
 } from './db.js';
 import { inspectWorkbook } from './importer.js';
+import { downloadWorkbook } from './exporter.js';
 import {
   CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, integer, isoToday, localISODate, normalizeCashflowCategory,
   monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity, toNumber,
@@ -635,35 +636,26 @@ function editByTable(table, id) {
 const csvNumericCell = (value, minimumFractionDigits = 0, maximumFractionDigits = 2) => ({
   __csvNumeric: true,
   value: new Intl.NumberFormat('id-ID', { minimumFractionDigits, maximumFractionDigits }).format(Number(value) || 0),
+  numericValue: Number(value) || 0,
+  numberFormat: minimumFractionDigits > 0 ? '#,##0.00;[Red](#,##0.00);-' : '#,##0.##;[Red](#,##0.##);-',
 });
 const csvMoney = (value) => csvNumericCell(value, 2, 2);
 const csvQuantity = (value) => csvNumericCell(value, 0, 2);
-const csvDate = (value) => value ? formatDate(value) : '—';
+const csvDate = (value) => value ? { __csvDate: true, value: formatDate(value), iso: String(value).slice(0, 10) } : '—';
 const reportPeriod = () => monthName(state.month);
 
-function downloadReport(filename, title, period, summary, headers, details, totalRow = null) {
-  const exportedAt = new Intl.DateTimeFormat('id-ID', {
-    dateStyle: 'long', timeStyle: 'short', timeZone: 'Asia/Jakarta',
-  }).format(new Date());
-  const rows = [
-    ['LAPORAN CV SURYA PRATAMA MANDIRI'],
-    ['Nama laporan', title],
-    ['Periode', period],
-    ['Waktu ekspor', exportedAt],
-    [],
-    ['REKAPAN'],
-    ['Indikator', 'Nilai'],
-    ...summary,
-    [],
-    ['RINCIAN DATA'],
-    headers,
-    ...details,
-    ...(totalRow ? [totalRow] : []),
-  ];
-  downloadCsv(filename, rows);
+async function downloadReport(filename, title, period, summary, headers, details, format = 'csv') {
+  if (format === 'xlsx') {
+    await downloadWorkbook({
+      filename: filename.replace(/\.csv$/i, '.xlsx'), title, period, summary, headers, details,
+    });
+    return;
+  }
+  // Keep CSVs as flat tables so every row lines up with the first row of headers.
+  downloadCsv(filename, [headers, ...details]);
 }
 
-function exportData(kind) {
+async function exportData(kind, format = 'csv') {
   const period = reportPeriod();
   if (kind === 'cashflow') {
     const all = state.data.cashflow_transactions;
@@ -678,12 +670,11 @@ function exportData(kind) {
       csvDate(row.transaction_date), row.category, row.requester || '—', row.description || '—',
       row.kind === 'debit' ? csvMoney(row.amount) : '', row.kind === 'credit' ? csvMoney(row.amount) : '',
     ]);
-    downloadReport(`spm-cashflow-${state.month}.csv`, 'Cashflow dan transaksi kas', period, [
+    await downloadReport(`spm-cashflow-${state.month}.csv`, 'Cashflow dan transaksi kas', period, [
       ['Jumlah transaksi', csvQuantity(rows.length)], ['Total uang masuk (Rp)', csvMoney(credit)],
       ['Total uang keluar (Rp)', csvMoney(debit)], ['Arus kas bersih periode (Rp)', csvMoney(credit - debit)],
       ['Saldo berjalan saat ekspor (Rp)', csvMoney(balance)],
-    ], ['Tanggal', 'Kategori', 'Pengaju', 'Keterangan', 'Debit (Rp)', 'Kredit (Rp)'], details,
-    ['TOTAL PERIODE', '', '', '', csvMoney(debit), csvMoney(credit)]);
+    ], ['Tanggal', 'Kategori', 'Pengaju', 'Keterangan', 'Debit (Rp)', 'Kredit (Rp)'], details, format);
   } else if (kind === 'invoices') {
     const rows = [...state.data.sales_invoices].sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' })
       || (a.invoice_date || '').localeCompare(b.invoice_date || '') || (a.invoice_number || '').localeCompare(b.invoice_number || '', 'id-ID'));
@@ -697,12 +688,11 @@ function exportData(kind) {
       row.customer, csvDate(row.invoice_date), csvDate(row.due_date), csvDate(row.paid_date), row.invoice_number, row.po_number || '—',
       csvMoney(row.amount), csvMoney(row.paid_amount), csvMoney(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0)), statusForInvoice(row)[1],
     ]);
-    downloadReport('spm-invoice-semua-periode.csv', 'Tagihan customer', 'Semua periode', [
+    await downloadReport('spm-invoice-semua-periode.csv', 'Tagihan customer', 'Semua periode', [
       ['Jumlah invoice', csvQuantity(rows.length)], ['Jumlah customer', csvQuantity(new Set(rows.map((row) => row.customer).filter(Boolean)).size)],
       ['Nilai seluruh invoice (Rp)', csvMoney(totalAmount)], ['Total pembayaran tercatat (Rp)', csvMoney(totalPaid)],
       ['Total outstanding (Rp)', csvMoney(totalOutstanding)], ...Object.entries(statusCounts).map(([status, count]) => [`Invoice ${status.toLocaleLowerCase('id-ID')}`, csvQuantity(count)]),
-    ], ['Customer', 'Tanggal invoice', 'Jatuh tempo', 'Tanggal pelunasan', 'No. invoice', 'No. PO', 'Nilai invoice (Rp)', 'Sudah dibayar (Rp)', 'Outstanding (Rp)', 'Status'], details,
-    ['TOTAL SEMUA CUSTOMER', '', '', '', '', '', csvMoney(totalAmount), csvMoney(totalPaid), csvMoney(totalOutstanding), '']);
+    ], ['Customer', 'Tanggal invoice', 'Jatuh tempo', 'Tanggal pelunasan', 'No. invoice', 'No. PO', 'Nilai invoice (Rp)', 'Sudah dibayar (Rp)', 'Outstanding (Rp)', 'Status'], details, format);
   } else if (kind === 'production') {
     const rows = state.data.customer_orders.filter((row) => row.order_date?.startsWith(state.month))
       .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
@@ -732,7 +722,7 @@ function exportData(kind) {
         row.size_sheet || '—', row.floot || '—', row.score || '—', row.height || '—', row.score_secondary || '—', orderProgress(row)[1],
       ];
     });
-    downloadReport(`spm-produksi-${state.month}.csv`, 'Performa produksi dan pesanan customer', period, [
+    await downloadReport(`spm-produksi-${state.month}.csv`, 'Performa produksi dan pesanan customer', period, [
       ['Jumlah baris pesanan', csvQuantity(rows.length)], ['Jumlah PO unik', csvQuantity(new Set(rows.map((row) => row.po_number).filter(Boolean)).size)],
       ['Total qty dipesan', csvQuantity(totals.ordered)], ['Total qty diproduksi', csvQuantity(totals.produced)],
       ['Total qty terkirim', csvQuantity(totals.delivered)], ['Total kekurangan kirim', csvQuantity(totals.shortage)],
@@ -740,8 +730,7 @@ function exportData(kind) {
       ['Jumlah jual (Rp)', csvMoney(totals.realizedAmount)], ['PPN jual (Rp)', csvMoney(totals.realizedTax)],
       ['Jumlah jual termasuk PPN (Rp)', csvMoney(totals.realizedTotal)], ['Kurang jual (Rp)', csvMoney(totals.salesShortfall)],
       ['Pesanan lewat janji', csvQuantity(rows.filter((row) => orderProgress(row)[0] === 'late').length)],
-    ], ['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'SPM/SKG', 'Item', 'Size', 'QTY PO', 'Qty diproduksi', 'Delivery', 'Close/Kurang kirim', 'Price (Rp)', 'Total harga (Rp)', 'PPN PO (Rp)', 'Total price PO (Rp)', 'Jumlah jual (Rp)', 'PPN jual (Rp)', 'Jumlah jual+PPN (Rp)', 'Kurang jual (Rp)', 'Size Sheet', 'Floot', 'Scoor', 'Tinggi', 'Scoor 2', 'Status pesanan'], details,
-    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.produced), csvQuantity(totals.delivered), csvQuantity(totals.qtyDelta), '', csvMoney(totals.amount), csvMoney(totals.tax), csvMoney(totals.totalPrice), csvMoney(totals.realizedAmount), csvMoney(totals.realizedTax), csvMoney(totals.realizedTotal), csvMoney(totals.salesShortfall), '', '', '', '', '', '']);
+    ], ['Tanggal PO', 'Janji kirim', 'No. PO', 'Customer', 'SPM/SKG', 'Item', 'Size', 'QTY PO', 'Qty diproduksi', 'Delivery', 'Close/Kurang kirim', 'Price (Rp)', 'Total harga (Rp)', 'PPN PO (Rp)', 'Total price PO (Rp)', 'Jumlah jual (Rp)', 'PPN jual (Rp)', 'Jumlah jual+PPN (Rp)', 'Kurang jual (Rp)', 'Size Sheet', 'Floot', 'Scoor', 'Tinggi', 'Scoor 2', 'Status pesanan'], details, format);
   } else if (kind === 'supplier-po') {
     const orders = state.data.supplier_purchase_orders.filter((order) => order.order_date?.startsWith(state.month))
       .sort((a, b) => (a.order_date || '').localeCompare(b.order_date || '') || (a.po_number || '').localeCompare(b.po_number || '', 'id-ID'));
@@ -759,15 +748,14 @@ function exportData(kind) {
       item.qlty || '—', item.sizeSheet || '—', csvQuantity(ordered), csvQuantity(received), csvQuantity(remaining), csvMoney(price),
       csvMoney(receivedValue), csvMoney(receivedTax), csvMoney(receivedTotal),
     ]);
-    downloadReport(`spm-po-supplier-${state.month}.csv`, 'Rekap penerimaan bahan PO supplier', period, [
+    await downloadReport(`spm-po-supplier-${state.month}.csv`, 'Rekap penerimaan bahan PO supplier', period, [
       ['Jumlah PO', csvQuantity(new Set(orders.map((order) => order.po_number).filter(Boolean)).size)],
       ['Jumlah supplier', csvQuantity(new Set(orders.map((order) => String(order.supplier || '').trim().toLocaleLowerCase('id-ID')).filter(Boolean)).size)],
       ['Jumlah baris item', csvQuantity(items.length)], ['Total qty order dari supplier', csvQuantity(totals.ordered)],
       ['Total qty diterima oleh kita', csvQuantity(totals.received)], ['Total qty belum diterima', csvQuantity(totals.remaining)],
       ['Nilai diterima sebelum PPN (Rp)', csvMoney(totals.receivedValue)], ['PPN penerimaan (Rp)', csvMoney(totals.receivedTax)],
       ['Total nilai diterima termasuk PPN (Rp)', csvMoney(totals.receivedTotal)],
-    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order dari supplier', 'Qty diterima oleh kita', 'Sisa belum diterima', 'Harga/unit (Rp)', 'Nilai diterima (Rp)', 'PPN diterima (Rp)', 'Total diterima + PPN (Rp)'], details,
-    ['TOTAL PERIODE', '', '', '', '', '', '', csvQuantity(totals.ordered), csvQuantity(totals.received), csvQuantity(totals.remaining), '', csvMoney(totals.receivedValue), csvMoney(totals.receivedTax), csvMoney(totals.receivedTotal)]);
+    ], ['Tanggal PO', 'No. PO', 'Supplier', 'Customer', 'Item', 'QLTY', 'Ukuran sheet', 'Qty order dari supplier', 'Qty diterima oleh kita', 'Sisa belum diterima', 'Harga/unit (Rp)', 'Nilai diterima (Rp)', 'PPN diterima (Rp)', 'Total diterima + PPN (Rp)'], details, format);
   } else if (kind === 'supplier-ledger') {
     const all = [
       ...state.data.supplier_ledger_entries,
@@ -793,7 +781,7 @@ function exportData(kind) {
     const details = rows.map((row) => {
       const linkedBill = row.linked_bill_id ? billsById.get(row.linked_bill_id) : null;
       const linkedBillLabel = linkedBill
-        ? `${csvDate(linkedBill.entry_date)} · ${linkedBill.description || 'Tanpa keterangan'} · ${csvMoney(linkedBill.amount)}`
+        ? `${formatDate(linkedBill.entry_date)} · ${linkedBill.description || 'Tanpa keterangan'} · ${rupiah(linkedBill.amount)}`
         : row.entry_type === 'payment' ? 'Belum ditautkan ke tagihan tertentu' : '';
       return [
         csvDate(row.entry_date), row.supplier, row.entry_type === 'bill' ? 'Tagihan' : row.entry_type === 'adjustment' ? 'Koreksi hutang' : 'Pembayaran',
@@ -801,13 +789,12 @@ function exportData(kind) {
         csvMoney(Math.max(balanceAfterEntry.get(row.id) || 0, 0)), linkedBillLabel, row.description || '—',
       ];
     });
-    downloadReport(`spm-hutang-pemasok-${state.month}.csv`, 'Hutang dan pembayaran supplier', period, [
+    await downloadReport(`spm-hutang-pemasok-${state.month}.csv`, 'Hutang dan pembayaran supplier', period, [
       ['Jumlah transaksi periode', csvQuantity(rows.length)], ['Total tagihan periode (Rp)', csvMoney(bills)],
       ['Koreksi hutang periode (Rp)', csvMoney(adjustments)], ['Total pembayaran periode (Rp)', csvMoney(payments)], ['Perubahan saldo periode (Rp)', csvMoney(bills + adjustments - payments)],
       ['Sisa hutang seluruh supplier saat ekspor (Rp)', csvMoney(currentOutstanding)],
       ['Supplier dengan hutang aktif saat ekspor', csvQuantity(currentBalances.filter((value) => value > 0).length)],
-    ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Tagihan yang dibayar', 'Keterangan'], details,
-    ['TOTAL PERIODE', '', '', csvMoney(bills + adjustments), csvMoney(payments), '', '', '']);
+    ], ['Tanggal', 'Supplier', 'Jenis transaksi', 'Tagihan (Rp)', 'Pembayaran (Rp)', 'Sisa supplier setelah transaksi (Rp)', 'Tagihan yang dibayar', 'Keterangan'], details, format);
   } else if (kind === 'events') {
     const rows = state.data.production_events.filter((row) => row.event_date?.startsWith(state.month))
       .sort((a, b) => (a.event_date || '').localeCompare(b.event_date || '') || String(a.id || '').localeCompare(String(b.id || '')));
@@ -818,11 +805,10 @@ function exportData(kind) {
       csvDate(row.event_date), order?.customer || 'PO dihapus/tidak ditemukan', order?.po_number || '—', order?.item || '—',
       causeLabel(row.cause_category), row.cause_detail || '—', csvQuantity(row.affected_qty), row.status === 'open' ? 'Terbuka' : 'Selesai',
     ]);
-    downloadReport(`spm-kendala-produksi-${state.month}.csv`, 'Kendala dan penyebab produksi', period, [
+    await downloadReport(`spm-kendala-produksi-${state.month}.csv`, 'Kendala dan penyebab produksi', period, [
       ['Jumlah catatan kendala', csvQuantity(rows.length)], ['Kendala masih terbuka', csvQuantity(rows.filter((row) => row.status === 'open').length)],
       ['Kendala selesai', csvQuantity(rows.filter((row) => row.status === 'resolved').length)], ['Total unit terdampak', csvQuantity(affected)],
-    ], ['Tanggal', 'Customer', 'No. PO', 'Barang', 'Kategori penyebab', 'Catatan', 'Unit terdampak', 'Status'], details,
-    ['TOTAL PERIODE', '', '', '', '', '', csvQuantity(affected), '']);
+    ], ['Tanggal', 'Customer', 'No. PO', 'Barang', 'Kategori penyebab', 'Catatan', 'Unit terdampak', 'Status'], details);
   } else if (kind === 'dashboard-invoices') {
     const rows = state.data.sales_invoices.filter((row) => Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0)) > 0)
       .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.due_date || '9999').localeCompare(b.due_date || '9999'));
@@ -835,19 +821,18 @@ function exportData(kind) {
       row.customer || '—', row.invoice_number, row.po_number || '—', csvDate(row.invoice_date), csvDate(row.due_date),
       csvMoney(row.amount), csvMoney(row.paid_amount), csvMoney(outstanding(row)), statusForInvoice(row)[1],
     ]);
-    downloadReport('spm-outstanding-invoice-semua-periode.csv', 'Invoice customer yang belum lunas', 'Semua periode', [
+    await downloadReport('spm-outstanding-invoice-semua-periode.csv', 'Invoice customer yang belum lunas', 'Semua periode', [
       ['Jumlah invoice outstanding', csvQuantity(rows.length)], ['Jumlah customer', csvQuantity(new Set(rows.map((row) => row.customer).filter(Boolean)).size)],
       ['Nilai invoice (Rp)', csvMoney(totalAmount)], ['Pembayaran tercatat (Rp)', csvMoney(totalPaid)],
       ['Total outstanding (Rp)', csvMoney(totalOutstanding)], ['Invoice terlambat', csvQuantity(overdue.length)],
       ['Outstanding terlambat (Rp)', csvMoney(overdue.reduce((sum, row) => sum + outstanding(row), 0))],
-    ], ['Customer', 'No. invoice', 'No. PO', 'Tanggal invoice', 'Jatuh tempo', 'Nilai invoice (Rp)', 'Sudah dibayar (Rp)', 'Outstanding (Rp)', 'Status'], details,
-    ['TOTAL OUTSTANDING', '', '', '', '', csvMoney(totalAmount), csvMoney(totalPaid), csvMoney(totalOutstanding), '']);
+    ], ['Customer', 'No. invoice', 'No. PO', 'Tanggal invoice', 'Jatuh tempo', 'Nilai invoice (Rp)', 'Sudah dibayar (Rp)', 'Outstanding (Rp)', 'Status'], details);
   } else if (kind === 'pricelist') {
     const prices = pricelist.flatMap((row) => row[2].map(Number));
     const minimum = Math.min(...prices); const maximum = Math.max(...prices);
     const average = prices.reduce((sum, value) => sum + value, 0) / (prices.length || 1);
     const details = pricelist.map((row) => [row[0], ...row[1], ...row[2].map((value) => csvNumericCell(value, 0, 0))]);
-    downloadReport('spm-pricelist-karton.csv', 'Daftar harga karton', 'Tidak berlaku', [
+    await downloadReport('spm-pricelist-karton.csv', 'Daftar harga karton', 'Tidak berlaku', [
       ['Jumlah komposisi material', csvQuantity(pricelist.length)], ['Varian harga per komposisi', csvQuantity(priceSpecs.length)],
       ['Harga minimum (Rp)', csvNumericCell(minimum, 0, 0)], ['Harga maksimum (Rp)', csvNumericCell(maximum, 0, 0)],
       ['Rata-rata harga (Rp)', csvNumericCell(average, 0, 0)],
@@ -1311,7 +1296,11 @@ async function handleClick(event) {
     state.poDraft.items[index].harga = Number(button.dataset.price) || 0;
     state.calculatorTarget = null; state.tab = 'supplier'; supplierOrderModal(state.poDraft); return;
   }
-  if (action === 'export') { exportData(button.dataset.kind); return; }
+  if (action === 'export') {
+    try { await exportData(button.dataset.kind, button.dataset.format || 'csv'); }
+    catch (error) { toast(friendlyError(error), 'error'); }
+    return;
+  }
   if (action === 'open-import') { state.tab = 'impor'; void refreshData(); return; }
   if (action === 'refresh-import') { if (state.importFile) await readImportFile(state.importFile, state.importPreview?.sheetName); return; }
   if (action === 'confirm-import') {
