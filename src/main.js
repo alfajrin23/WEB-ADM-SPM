@@ -5,7 +5,7 @@ import {
 import { inspectWorkbook } from './importer.js';
 import { downloadWorkbook } from './exporter.js';
 import {
-  CAUSES, CASH_CATEGORIES, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, integer, isoToday, localISODate, normalizeCashflowCategory,
+  CAUSES, CASH_CATEGORIES, CUSTOMER_VAT_RATE, customerOrderFinancials, downloadCsv, escapeHtml as esc, formatDate, formatNumberInput, icon, integer, isoToday, localISODate, normalizeCashflowCategory,
   monthName, orderProgress, rupiah, statusForInvoice, supplierOrderReceivedQuantity, toNumber,
 } from './helpers.js';
 import { calculatorValues, pageTabs, renderPage, renderSignIn } from './views.js';
@@ -37,6 +37,7 @@ const tableByAction = {
   'save-po': 'supplier_purchase_orders', 'save-received': 'supplier_purchase_orders',
   'save-quantities': 'customer_orders',
 };
+const customerOrderTax = (amount) => Math.round(amount * CUSTOMER_VAT_RATE * 100) / 100;
 
 const state = {
   session: null,
@@ -555,10 +556,10 @@ function updateSupplierPaymentSelection(select) {
 
 function customerOrderModal(row = {}) {
   const amount = Number(row.qty_order || 0) * Number(row.unit_price || 0);
-  const tax = Number(row.po_tax_amount || 0);
+  const tax = customerOrderTax(amount);
   openModal({
     title: row.id ? 'Edit PO customer' : 'PO customer baru', action: 'save-customer-order', submit: row.id ? 'Simpan perubahan' : 'Simpan PO', attrs: row.id ? `data-id="${row.id}"` : '',
-    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date', { required: true })}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Opsional; dipakai untuk menilai PO yang terlambat.' })}${inputField('No PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('SPM/SKG', 'spm_skg', row.spm_skg || 'SPM', 'text', { required: true, placeholder: 'SPM atau SKG' })}${inputField('QTY PO', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01', attrs: 'data-customer-order-calc' })}${inputField('PRICE', 'unit_price', row.unit_price ?? '', 'number', { required: true, min: 0, step: '0.01', money: true, attrs: 'data-customer-order-calc' })}${inputField('PPN PO', 'po_tax_amount', row.po_tax_amount ?? 0, 'number', { min: 0, step: '0.01', money: true, attrs: 'data-customer-order-calc' })}${inputField('SIZE', 'size', row.size || '')}${inputField('ITEM', 'item', row.item || '', 'text', { required: true })}</div><div class="order-total-preview"><div><span>Total Harga</span><strong data-customer-order-preview="amount">${rupiah(amount)}</strong><small>QTY PO × PRICE</small></div><div><span>PPN</span><strong data-customer-order-preview="tax">${rupiah(tax)}</strong><small>Nilai PPN yang dicatat pada PO</small></div><div><span>Total Price</span><strong data-customer-order-preview="total">${rupiah(amount + tax)}</strong><small>Total Harga + PPN</small></div></div><p class="form-hint">Delivery dan spesifikasi proses dicatat pada halaman Produksi. Kekurangan kirim serta nilai jual dihitung dari data PO dan realisasi.</p>`,
+    body: `<div class="form-grid">${inputField('Tanggal PO', 'order_date', row.order_date || isoToday(), 'date', { required: true })}${inputField('Tanggal janji kirim', 'due_date', row.due_date || '', 'date', { hint: 'Opsional; dipakai untuk menilai PO yang terlambat.' })}${inputField('No PO', 'po_number', row.po_number || '', 'text', { required: true })}${inputField('Customer', 'customer', row.customer || '', 'text', { required: true })}${inputField('SPM/SKG', 'spm_skg', row.spm_skg || 'SPM', 'text', { required: true, placeholder: 'SPM atau SKG' })}${inputField('QTY PO', 'qty_order', row.qty_order ?? '', 'number', { required: true, min: 0, step: '0.01', attrs: 'data-customer-order-calc' })}${inputField('PRICE', 'unit_price', row.unit_price ?? '', 'number', { required: true, min: 0, step: '0.01', money: true, attrs: 'data-customer-order-calc' })}${inputField('PPN PO (11%)', 'po_tax_amount', tax, 'number', { min: 0, step: '0.01', money: true, hint: 'Otomatis dihitung 11% dari QTY PO × PRICE.', attrs: 'readonly aria-readonly="true"' })}${inputField('SIZE', 'size', row.size || '')}${inputField('ITEM', 'item', row.item || '', 'text', { required: true })}</div><div class="order-total-preview"><div><span>Total Harga</span><strong data-customer-order-preview="amount">${rupiah(amount)}</strong><small>QTY PO × PRICE</small></div><div><span>PPN</span><strong data-customer-order-preview="tax">${rupiah(tax)}</strong><small>11% dari Total Harga</small></div><div><span>Total Price</span><strong data-customer-order-preview="total">${rupiah(amount + tax)}</strong><small>Total Harga + PPN</small></div></div><p class="form-hint">Delivery dan spesifikasi proses dicatat pada halaman Produksi. Kekurangan kirim serta nilai jual dihitung dari data PO dan realisasi.</p>`,
   });
 }
 
@@ -567,7 +568,9 @@ function updateCustomerOrderPreview(target) {
   if (!form) return;
   const read = (name) => toNumber(form.elements.namedItem(name)?.value);
   const amount = read('qty_order') * read('unit_price');
-  const tax = read('po_tax_amount');
+  const tax = customerOrderTax(amount);
+  const taxInput = form.elements.namedItem('po_tax_amount');
+  if (taxInput) taxInput.value = formatNumberInput(tax);
   const values = { amount, tax, total: amount + tax };
   Object.entries(values).forEach(([key, value]) => {
     const output = form.querySelector(`[data-customer-order-preview="${key}"]`);
@@ -979,13 +982,14 @@ async function saveModal(form) {
   if (action === 'save-customer-order') {
     const qtyOrder = num('qty_order');
     const unitPrice = num('unit_price');
-    const tax = num('po_tax_amount');
+    const amount = qtyOrder * unitPrice;
+    const tax = customerOrderTax(amount);
     if (qtyOrder <= 0) throw new Error('QTY PO harus lebih besar dari 0.');
     if (!values.order_date) throw new Error('Tanggal PO wajib diisi.');
     return saveRow('customer_orders', {
       order_date: values.order_date, due_date: values.due_date || null, po_number: values.po_number.trim(), customer: values.customer.trim(),
       spm_skg: values.spm_skg.trim().toUpperCase(), item: values.item.trim(), size: values.size.trim(), qty_order: qtyOrder,
-      unit_price: unitPrice, amount: qtyOrder * unitPrice, po_tax_amount: tax, total_price: qtyOrder * unitPrice + tax,
+      unit_price: unitPrice, amount, po_tax_amount: tax, total_price: amount + tax,
     }, id);
   }
   if (action === 'save-production-event') {
