@@ -155,7 +155,7 @@ export function customerOrderFinancials(row) {
   const tax = Number(row.po_tax_amount || 0);
   const totalPrice = row.total_price == null ? amount + tax : Number(row.total_price);
   const realizedAmount = qtyDelivered * unitPrice;
-  const realizedTax = realizedAmount * CUSTOMER_VAT_RATE;
+  const realizedTax = tax > 0 ? realizedAmount * CUSTOMER_VAT_RATE : 0;
   const realizedTotal = realizedAmount + realizedTax;
   return {
     qtyOrder, qtyDelivered, unitPrice, amount, tax, totalPrice,
