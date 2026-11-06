@@ -152,8 +152,13 @@ export function customerOrderFinancials(row) {
   const qtyDelivered = Number(row.qty_delivered || 0);
   const unitPrice = Number(row.unit_price || 0);
   const amount = row.amount == null ? qtyOrder * unitPrice : Number(row.amount);
-  const tax = Number(row.po_tax_amount || 0);
-  const totalPrice = row.total_price == null ? amount + tax : Number(row.total_price);
+  const storedTax = Number(row.po_tax_amount || 0);
+  const storedTotalPrice = row.total_price == null ? null : Number(row.total_price);
+  const legacyTaxIncludesTotal = storedTotalPrice != null
+    && storedTax === storedTotalPrice
+    && storedTotalPrice > amount;
+  const tax = legacyTaxIncludesTotal ? storedTotalPrice - amount : storedTax;
+  const totalPrice = storedTotalPrice ?? amount + tax;
   const realizedAmount = qtyDelivered * unitPrice;
   const realizedTax = tax > 0 ? realizedAmount * CUSTOMER_VAT_RATE : 0;
   const realizedTotal = realizedAmount + realizedTax;
