@@ -71,6 +71,7 @@ const state = {
   incomePlanPeriod: 'week',
   category: '',
   invoiceStatus: '',
+  invoiceMonth: '',
   search: '',
   modal: null,
   pendingDelete: null,
@@ -1394,6 +1395,7 @@ async function handleChange(event) {
   }
   if (target.matches('[data-filter="cashCategory"]')) { state.category = target.value; render(); return; }
   if (target.matches('[data-filter="invoiceStatus"]')) { state.invoiceStatus = target.value; render(); return; }
+  if (target.matches('[data-filter="invoiceMonth"]')) { state.invoiceMonth = target.value; render(); return; }
   if (target.matches('[data-import-file]')) { await readImportFile(target.files?.[0]); return; }
   if (target.matches('[data-import-sheet]')) { await readImportFile(state.importFile, target.value); return; }
   if (target.matches('[data-calc]')) {
