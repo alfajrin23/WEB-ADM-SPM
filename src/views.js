@@ -225,7 +225,7 @@ function invoiceIncomePlan(data, month, selectedWeek, period) {
   const plan = buildIncomePlan(data, month);
   const weekIndex = selectedIncomeWeekIndex(plan, month, selectedWeek);
   const description = period === 'month' ? `Total rencana uang masuk dan rincian customer dari invoice outstanding selama ${monthName(month)}.` : 'Estimasi pekan terpilih dari seluruh invoice outstanding berdasarkan tanggal jatuh tempo.';
-  return `<section class="panel income-plan-panel"><div class="panel-heading"><div><p class="eyebrow">PERENCANAAN KAS</p><h2>Rencana uang masuk · ${esc(monthName(month))}</h2><p>${description}</p></div><div class="income-plan-filters">${incomeWeekFilter(plan, weekIndex, period)}${periodFilter(month)}</div></div>
+  return `<section class="panel income-plan-panel"><div class="panel-heading"><div><p class="eyebrow">PERENCANAAN KAS</p><h2>Rencana uang masuk · ${esc(monthName(month))}</h2><p>${description}</p></div><div class="income-plan-filters">${incomeWeekFilter(plan, weekIndex, period)}</div></div>
     ${incomePlanCards(plan, weekIndex, period)}
     ${incomePlanWeeks(plan, weekIndex, period)}
     ${incomePlanNotice(plan)}
@@ -467,7 +467,7 @@ function payables(data, state) {
 }
 
 function invoices(data, state) {
-  const rows = data.sales_invoices.filter((row) => (!state.invoiceStatus || statusForInvoice(row)[0] === state.invoiceStatus) && (!state.search || `${row.customer} ${row.invoice_number} ${row.po_number}`.toLowerCase().includes(state.search.toLowerCase())))
+  const rows = data.sales_invoices.filter((row) => inMonth(row.invoice_date, state.month) && (!state.invoiceStatus || statusForInvoice(row)[0] === state.invoiceStatus) && (!state.search || `${row.customer} ${row.invoice_number} ${row.po_number}`.toLowerCase().includes(state.search.toLowerCase())))
     .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.invoice_date || '').localeCompare(b.invoice_date || '') || (a.invoice_number || '').localeCompare(b.invoice_number || '', 'id-ID'));
   const balance = rows.reduce((sum, row) => sum + Number(row.outstanding_amount ?? Math.max(row.amount - (row.paid_amount || 0), 0)), 0);
   const table = rows.map((row, index) => {
@@ -478,9 +478,9 @@ function invoices(data, state) {
       : '';
     return `${customerHeading}<tr class="invoice-${key}" data-row-id="${row.id}"><td>${formatDate(row.invoice_date)}</td><td>${formatDate(row.due_date)}</td><td>${formatDate(row.paid_date)}</td><td class="mono">${esc(row.invoice_number)}</td><td class="mono">${esc(row.po_number || '—')}</td><td class="numeric">${money(row.amount)}</td><td class="numeric">${money(amount)}</td><td><button class="status status-${key} status-button" type="button" data-act="toggle-invoice" data-id="${row.id}" title="Klik untuk mengubah status">${key === 'paid' ? icon('check', 13) : key === 'late' ? icon('alert', 13) : icon('clock', 13)}${esc(label)}</button></td><td class="row-actions">${smallButton('Edit invoice', 'edit', `data-table="sales_invoices" data-id="${row.id}"`)}${smallButton('Hapus invoice', 'delete', `data-table="sales_invoices" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
   }).join('');
-  return `${pageHead('KEUANGAN', 'Tagihan customer', 'Pantau tanggal jatuh tempo dan pembayaran invoice tanpa mencampur nilai tagihan dengan kas masuk.', actionButton('Invoice baru', 'new-invoice', '', 'plus'))}
+  return `${pageHead('KEUANGAN', 'Tagihan customer', 'Pantau tanggal jatuh tempo dan pembayaran invoice tanpa mencampur nilai tagihan dengan kas masuk.', `${periodFilter(state.month)}${actionButton('Invoice baru', 'new-invoice', '', 'plus')}`)}
     ${invoiceIncomePlan(data, state.month, state.incomeWeek, state.incomePlanPeriod)}
-    <div class="summary-grid">${statStrip('Nilai invoice', money(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)))}${statStrip('Outstanding', money(balance))}${statStrip('Terlambat', integer(rows.filter((row) => statusForInvoice(row)[0] === 'late').length))}${statStrip('Invoice', integer(rows.length))}</div>
+    <div class="summary-grid">${statStrip('Total penjualan', money(rows.reduce((sum, row) => sum + Number(row.amount || 0), 0)), monthName(state.month))}${statStrip('Outstanding', money(balance))}${statStrip('Terlambat', integer(rows.filter((row) => statusForInvoice(row)[0] === 'late').length))}${statStrip('Invoice', integer(rows.length))}</div>
     <section class="panel"><div class="toolbar"><label class="search-field">${icon('search', 17)}<input aria-label="Cari invoice" data-filter="search" value="${esc(state.search)}" placeholder="Cari customer, PO, atau invoice"></label><select class="select-compact" data-filter="invoiceStatus"><option value="">Semua status</option><option value="open" ${state.invoiceStatus === 'open' ? 'selected' : ''}>Belum dibayar</option><option value="late" ${state.invoiceStatus === 'late' ? 'selected' : ''}>Jatuh tempo</option><option value="partial" ${state.invoiceStatus === 'partial' ? 'selected' : ''}>Sebagian dibayar</option><option value="paid" ${state.invoiceStatus === 'paid' ? 'selected' : ''}>Lunas</option></select><div class="heading-actions">${actionButton('Export Excel', 'export', 'data-kind="invoices" data-format="xlsx"', 'download')}${actionButton('Export CSV', 'export', 'data-kind="invoices" data-format="csv"', 'download', 'secondary')}</div></div>
       ${rows.length ? tableWrap(`<table><thead><tr><th>Tanggal invoice</th><th>Jatuh tempo</th><th>Tanggal pelunasan</th><th>No. invoice</th><th>No. PO</th><th>Nilai</th><th>Sisa</th><th>Status</th><th class="actions-heading">Aksi</th></tr></thead><tbody>${table}</tbody></table>`) : emptyState('Belum ada invoice', 'Tambahkan tagihan customer atau impor workbook OS CARTON BOX.', 'new-invoice', 'Tambah invoice', 'file')}
     </section>`;
