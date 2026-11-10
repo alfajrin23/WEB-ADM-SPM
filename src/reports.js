@@ -429,14 +429,17 @@ function renderExpenseChart(expenses, total, periodName) {
 }
 
 function reportComparison(current, previous, inverse = false) {
-  const difference = current - previous;
-  const direction = difference > 0 ? 'up' : difference < 0 ? 'down' : 'flat';
+  const performanceChange = (current - previous) * (inverse ? -1 : 1);
+  const direction = performanceChange > 0 ? 'up' : performanceChange < 0 ? 'down' : 'flat';
   const percent = previous === 0
     ? (current === 0 ? '0%' : 'Baru')
-    : `${difference > 0 ? '+' : ''}${((difference / Math.abs(previous)) * 100).toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
-  const favorable = direction === 'flat' ? 'flat' : (direction === 'up') !== inverse ? 'favorable' : 'unfavorable';
+    : `${performanceChange > 0 ? '+' : ''}${((performanceChange / Math.abs(previous)) * 100).toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  const favorable = direction === 'flat' ? 'flat' : direction === 'up' ? 'favorable' : 'unfavorable';
+  const comparisonText = favorable === 'favorable'
+    ? 'lebih baik dibanding bulan kemarin'
+    : favorable === 'unfavorable' ? 'lebih buruk dibanding bulan kemarin' : 'tidak berubah dibanding bulan kemarin';
   const trendIcon = direction === 'flat' ? 'chart' : 'trend';
-  return `<div class="report-month-comparison"><span class="report-comparison-badge is-${favorable} ${favorable === 'unfavorable' ? 'trend-down' : ''}">${icon(trendIcon, 14)}<b>${esc(percent)}</b></span><span>dibanding bulan kemarin</span></div>`;
+  return `<div class="report-month-comparison is-${favorable}"><span class="report-comparison-badge is-${favorable} ${favorable === 'unfavorable' ? 'trend-down' : ''}">${icon(trendIcon, 14)}<b>${esc(percent)}</b></span><span>${comparisonText}</span></div>`;
 }
 
 function reportMetricCard(label, value, glyph, tone, caption = '', comparison = '') {
