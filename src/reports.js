@@ -436,7 +436,7 @@ function reportComparison(current, previous, inverse = false) {
     : `${difference > 0 ? '+' : ''}${((difference / Math.abs(previous)) * 100).toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
   const favorable = direction === 'flat' ? 'flat' : (direction === 'up') !== inverse ? 'favorable' : 'unfavorable';
   const trendIcon = direction === 'flat' ? 'chart' : 'trend';
-  return `<div class="report-month-comparison"><span class="report-comparison-badge is-${favorable} ${direction === 'down' ? 'trend-down' : ''}">${icon(trendIcon, 14)}<b>${esc(percent)}</b></span><span>dibanding bulan kemarin</span></div>`;
+  return `<div class="report-month-comparison"><span class="report-comparison-badge is-${favorable} ${favorable === 'unfavorable' ? 'trend-down' : ''}">${icon(trendIcon, 14)}<b>${esc(percent)}</b></span><span>dibanding bulan kemarin</span></div>`;
 }
 
 function reportMetricCard(label, value, glyph, tone, caption = '', comparison = '') {
