@@ -180,10 +180,13 @@ export function buildReport(data, state) {
   const selectedRows = (data.cashflow_transactions || []).filter((row) => selected.has(normalizeCategory(row.category)));
   const periodCashflow = selectedRows.filter((row) => inPeriod(row.transaction_date, period));
   const cashflow = cashflowTotals(periodCashflow);
+  const previousPeriod = shiftMonth(period, -1);
+  const previousCashflow = cashflowTotals(selectedRows.filter((row) => inPeriod(row.transaction_date, previousPeriod)));
   const cashInCategories = cashflowCategories(periodCashflow, 'credit');
   const cashOutCategories = cashflowCategories(periodCashflow, 'debit');
   const invoices = data.sales_invoices || [];
   const periodInvoices = invoices.filter((row) => inPeriod(row.invoice_date, period));
+  const previousInvoiceValue = sum(invoices.filter((row) => inPeriod(row.invoice_date, previousPeriod)), (row) => amountOf(row.amount));
   const dueInvoices = invoices.filter((row) => inPeriod(row.due_date, period));
   const nextPeriod = shiftMonth(period, 1);
   const nextDueInvoices = invoices.filter((row) => inPeriod(row.due_date, nextPeriod) && invoiceOutstanding(row) > 0);
@@ -308,6 +311,8 @@ export function buildReport(data, state) {
     selectedRows,
     periodCashflow,
     cashflow,
+    previousCashflow,
+    previousInvoiceValue,
     cashInCategories,
     cashOutCategories,
     trend,
@@ -423,11 +428,22 @@ function renderExpenseChart(expenses, total, periodName) {
   return `<div class="report-donut-layout">${svg}<div class="report-donut-legend" aria-label="Rincian pengeluaran per kategori">${legend}</div></div>${table}`;
 }
 
-function reportMetricCard(label, value, glyph, tone, caption = '') {
-  return `<article class="metric-card tone-${tone} report-metric-card"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon(glyph, 18)}</span></div><strong>${esc(value)}</strong>${caption ? `<small>${esc(caption)}</small>` : ''}</article>`;
+function reportComparison(current, previous, inverse = false) {
+  const difference = current - previous;
+  const direction = difference > 0 ? 'up' : difference < 0 ? 'down' : 'flat';
+  const percent = previous === 0
+    ? (current === 0 ? '0%' : 'Baru')
+    : `${difference > 0 ? '+' : ''}${((difference / Math.abs(previous)) * 100).toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  const favorable = direction === 'flat' ? 'flat' : (direction === 'up') !== inverse ? 'favorable' : 'unfavorable';
+  const trendIcon = direction === 'flat' ? 'chart' : 'trend';
+  return `<div class="report-month-comparison"><span class="report-comparison-badge is-${favorable} ${direction === 'down' ? 'trend-down' : ''}">${icon(trendIcon, 14)}<b>${esc(percent)}</b></span><span>dibanding bulan kemarin</span></div>`;
 }
 
-function reportCashflowMetricCard(label, value, glyph, tone, caption, categories, kind) {
+function reportMetricCard(label, value, glyph, tone, caption = '', comparison = '') {
+  return `<article class="metric-card tone-${tone} report-metric-card"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon(glyph, 18)}</span></div><strong>${esc(value)}</strong>${comparison}${caption ? `<small>${esc(caption)}</small>` : ''}</article>`;
+}
+
+function reportCashflowMetricCard(label, value, glyph, tone, caption, categories, kind, comparison) {
   const total = sum(categories, (row) => row.amount);
   let angle = -Math.PI / 2;
   const slices = categories.map((row) => {
@@ -442,7 +458,7 @@ function reportCashflowMetricCard(label, value, glyph, tone, caption, categories
   const categoryNames = categories.length
     ? categories.map((row) => `<span class="report-cashflow-category" style="--cash-category-color:${row.color}"><i></i>${esc(row.category)}</span>`).join('')
     : '<span class="report-cashflow-no-category">Tidak ada kategori</span>';
-  return `<article class="metric-card tone-${tone} report-metric-card report-cashflow-metric"><div class="report-cashflow-copy"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon(glyph, 18)}</span></div><div class="report-cashflow-categories">${categoryNames}</div><strong>${esc(value)}</strong><small>${esc(caption)}</small></div>${pie}</article>`;
+  return `<article class="metric-card tone-${tone} report-metric-card report-cashflow-metric"><div class="report-cashflow-copy"><div class="metric-top"><span>${esc(label)}</span><span class="metric-icon">${icon(glyph, 18)}</span></div><div class="report-cashflow-categories">${categoryNames}</div><strong>${esc(value)}</strong>${comparison}<small>${esc(caption)}</small></div>${pie}</article>`;
 }
 
 function reportBreakdownCard(label, value, caption, tone = 'blue') {
@@ -561,13 +577,17 @@ export function renderReport(data, state) {
   const categoryControls = report.categories.map((category) => `<label class="report-category-option"><input type="checkbox" data-report-category value="${esc(category)}" ${report.selectedCategories.includes(category) ? 'checked' : ''}><span>${esc(displayCategory(category))}</span></label>`).join('');
   const plan = reportPlanView(report, state);
   const executiveSummary = `${integer(report.invoices.length)} invoice customer terbit senilai ${rupiah(report.invoiceValue)} dan ${integer(report.uniqueCustomerPoCount)} PO Customer senilai ${rupiah(report.customerOrderValue)} pada ${report.periodName}.`;
+  const invoiceComparison = reportComparison(report.invoiceValue, report.previousInvoiceValue);
+  const cashInComparison = reportComparison(report.cashflow.cashIn, report.previousCashflow.cashIn);
+  const cashOutComparison = reportComparison(report.cashflow.cashOut, report.previousCashflow.cashOut, true);
+  const netComparison = reportComparison(report.cashflow.net, report.previousCashflow.net);
   const metrics = [
-    reportMetricCard('Penjualan · invoice', rupiah(report.invoiceValue), 'file', 'violet', `${integer(report.invoices.length)} invoice pada periode ${report.periodName} · nilai tagihan terbit.`),
+    reportMetricCard('Penjualan · invoice', rupiah(report.invoiceValue), 'file', 'violet', `${integer(report.invoices.length)} invoice pada periode ${report.periodName} · nilai tagihan terbit.`, invoiceComparison),
     reportMetricCard('Rencana penagihan', rupiah(plan.amount), 'clock', 'gold', `${plan.label} · estimasi, bukan kas aktual.`),
     reportMetricCard('PO Customer', rupiah(report.customerOrderValue), 'package', 'blue', `${integer(report.uniqueCustomerPoCount)} PO unik · ${integer(report.customerOrders.length)} baris item.`),
-    reportCashflowMetricCard('Kas masuk', rupiah(report.cashflow.cashIn), 'wallet', 'green', 'Cashflow aktual · transaksi kind credit.', report.cashInCategories, 'credit'),
-    reportCashflowMetricCard('Kas keluar', rupiah(report.cashflow.cashOut), 'file', 'red', 'Cashflow aktual · transaksi kind debit.', report.cashOutCategories, 'debit'),
-    reportMetricCard('Arus kas bersih', rupiah(report.cashflow.net), 'trend', 'orange', 'Kas masuk dikurangi kas keluar.'),
+    reportCashflowMetricCard('Kas masuk', rupiah(report.cashflow.cashIn), 'wallet', 'green', 'Cashflow aktual · transaksi kind credit.', report.cashInCategories, 'credit', cashInComparison),
+    reportCashflowMetricCard('Kas keluar', rupiah(report.cashflow.cashOut), 'file', 'red', 'Cashflow aktual · transaksi kind debit.', report.cashOutCategories, 'debit', cashOutComparison),
+    reportMetricCard('Arus kas bersih', rupiah(report.cashflow.net), 'trend', 'orange', 'Kas masuk dikurangi kas keluar.', netComparison),
   ].join('');
   const trendTable = `<details class="report-data-details"><summary>Lihat tabel nilai tren per bulan</summary><div class="table-wrap"><table><thead><tr><th>Periode</th><th class="numeric">Kas masuk</th><th class="numeric">Kas keluar</th><th class="numeric">Arus kas bersih</th></tr></thead><tbody>${report.trend.map((row) => `<tr><th>${esc(monthName(row.month))}</th><td class="numeric">${esc(rupiah(row.cashIn))}</td><td class="numeric">${esc(rupiah(row.cashOut))}</td><td class="numeric">${esc(rupiah(row.net))}</td></tr>`).join('')}</tbody></table></div></details>`;
   const supplierSection = reportSupplierPanel(report);

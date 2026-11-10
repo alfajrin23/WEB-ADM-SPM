@@ -633,13 +633,20 @@ button.cash-category-card:hover, button.cash-category-card.selected { border-col
 .metric-grid.report-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; margin: 16px 0; }
 .report-metric-grid .report-metric-card,
 .report-metric-grid .report-metric-card:nth-child(1),
-.report-metric-grid .report-metric-card:nth-child(2) { min-height: 135px; padding: 16px 17px; }
+.report-metric-grid .report-metric-card:nth-child(2) { min-height: 153px; padding: 16px 17px; }
 .report-metric-card > strong { margin-top: 12px; font-size: clamp(1rem, 1.6vw, 1.48rem); }
 .report-metric-card > small { max-width: 34ch; line-height: 1.45; }
+.report-month-comparison { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; color: #728079; font-size: .64rem; line-height: 1.25; }
+.report-comparison-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #cfe2d5; border-radius: 999px; background: #edf6ef; color: #28664c; font-size: .68rem; white-space: nowrap; }
+.report-comparison-badge svg { flex: 0 0 auto; }
+.report-comparison-badge.trend-down svg { transform: rotate(90deg); }
+.report-comparison-badge.is-unfavorable { border-color: #ead0ca; background: #fbefed; color: #a6473f; }
+.report-comparison-badge.is-flat { border-color: #d9e0dc; background: #f1f4f2; color: #64746d; }
 .report-cashflow-metric { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: center; gap: 8px; }
 .report-cashflow-copy { display: grid; min-width: 0; align-content: start; }
 .report-cashflow-copy .metric-top { margin-bottom: 0; }
 .report-cashflow-copy > strong { margin-top: 9px; font-size: clamp(.95rem, 1.35vw, 1.3rem); overflow-wrap: anywhere; }
+.report-cashflow-copy > .report-month-comparison { margin-top: 6px; font-size: .59rem; }
 .report-cashflow-copy > small { margin-top: 4px; color: #879399; font-size: .64rem; line-height: 1.4; }
 .report-cashflow-pie { display: block; width: 76px; height: 76px; }
 .report-cashflow-categories { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 20px; margin-top: 7px; }
