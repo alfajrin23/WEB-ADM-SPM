@@ -473,13 +473,28 @@ function invoices(data, state) {
     .sort((a, b) => (a.customer || '').localeCompare(b.customer || '', 'id-ID', { sensitivity: 'base' }) || (a.invoice_date || '').localeCompare(b.invoice_date || '') || (a.invoice_number || '').localeCompare(b.invoice_number || '', 'id-ID'));
   const balanceOf = (row) => Number(row.outstanding_amount ?? Math.max(Number(row.amount || 0) - Number(row.paid_amount || 0), 0));
   const balance = monthRows.reduce((sum, row) => sum + balanceOf(row), 0);
-  const table = rows.map((row, index) => {
-    const [key, label] = statusForInvoice(row);
-    const amount = balanceOf(row);
-    const customerHeading = index === 0 || rows[index - 1].customer !== row.customer
-      ? `<tr class="invoice-customer-heading"><td colspan="9">${esc(row.customer || 'Customer belum dicatat')}</td></tr>`
-      : '';
-    return `${customerHeading}<tr class="invoice-${key}" data-row-id="${row.id}"><td>${formatDate(row.invoice_date)}</td><td>${formatDate(row.due_date)}</td><td>${formatDate(row.paid_date)}</td><td class="mono">${esc(row.invoice_number)}</td><td class="mono">${esc(row.po_number || '—')}</td><td class="numeric">${money(row.amount)}</td><td class="numeric">${money(amount)}</td><td><button class="status status-${key} status-button" type="button" data-act="toggle-invoice" data-id="${row.id}" title="Klik untuk mengubah status">${key === 'paid' ? icon('check', 13) : key === 'late' ? icon('alert', 13) : icon('clock', 13)}${esc(label)}</button></td><td class="row-actions">${smallButton('Edit invoice', 'edit', `data-table="sales_invoices" data-id="${row.id}"`)}${smallButton('Hapus invoice', 'delete', `data-table="sales_invoices" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+  const customerGroups = [];
+  rows.forEach((row) => {
+    const customer = String(row.customer || '').trim() || 'Customer belum dicatat';
+    const key = customer.toLocaleLowerCase('id-ID');
+    let group = customerGroups.at(-1);
+    if (!group || group.key !== key) {
+      group = { key, customer, rows: [] };
+      customerGroups.push(group);
+    }
+    group.rows.push(row);
+  });
+  const table = customerGroups.map((group) => {
+    const invoiceRows = group.rows.map((row) => {
+      const [key, label] = statusForInvoice(row);
+      const amount = balanceOf(row);
+      return `<tr class="invoice-${key}" data-row-id="${row.id}"><td>${formatDate(row.invoice_date)}</td><td>${formatDate(row.due_date)}</td><td>${formatDate(row.paid_date)}</td><td class="mono">${esc(row.invoice_number)}</td><td class="mono">${esc(row.po_number || '—')}</td><td class="numeric">${money(row.amount)}</td><td class="numeric">${money(amount)}</td><td><button class="status status-${key} status-button" type="button" data-act="toggle-invoice" data-id="${row.id}" title="Klik untuk mengubah status">${key === 'paid' ? icon('check', 13) : key === 'late' ? icon('alert', 13) : icon('clock', 13)}${esc(label)}</button></td><td class="row-actions">${smallButton('Edit invoice', 'edit', `data-table="sales_invoices" data-id="${row.id}"`)}${smallButton('Hapus invoice', 'delete', `data-table="sales_invoices" data-id="${row.id}"`, 'trash', 'danger-icon')}</td></tr>`;
+    }).join('');
+    const paid = group.rows.reduce((sum, row) => sum + (statusForInvoice(row)[0] === 'paid' ? Number(row.amount || 0) : 0), 0);
+    const outstanding = group.rows.reduce((sum, row) => sum + balanceOf(row), 0);
+    const total = group.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const totals = `<tr class="invoice-customer-total"><td colspan="5">Total tagihan lunas</td><td class="numeric">${money(paid)}</td><td colspan="3"></td></tr><tr class="invoice-customer-total"><td colspan="6">Total belum bayar / jatuh tempo</td><td class="numeric">${money(outstanding)}</td><td colspan="2"></td></tr><tr class="invoice-customer-total invoice-customer-grand-total"><td colspan="5">Total keseluruhan</td><td class="numeric">${money(total)}</td><td class="numeric">${money(outstanding)}</td><td colspan="2"></td></tr>`;
+    return `<tr class="invoice-customer-heading"><td colspan="9">${esc(group.customer)}</td></tr>${invoiceRows}${totals}`;
   }).join('');
   return `${pageHead('KEUANGAN', 'Tagihan customer', 'Pantau tanggal jatuh tempo dan pembayaran invoice tanpa mencampur nilai tagihan dengan kas masuk.', actionButton('Invoice baru', 'new-invoice', '', 'plus'))}
     ${invoiceIncomePlan(data, state.month, state.incomeWeek, state.incomePlanPeriod)}
